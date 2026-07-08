@@ -100,6 +100,14 @@ typedef enum tra_ffic_type_kind {
   TRA_FFIC_TYPE_BUFFER_VIEW = 15,
 } tra_ffic_type_kind;
 
+/** Native function ABI used by a tra_ffic_signature. */
+typedef enum tra_ffic_signature_abi {
+  /** Native function has ABI void(tra_ffic_completion, ...typed_args). */
+  TRA_FFIC_SIGNATURE_ABI_COMPLETION = 0,
+  /** Native function has ABI return_type(...typed_args). */
+  TRA_FFIC_SIGNATURE_ABI_RETVAL = 1,
+} tra_ffic_signature_abi;
+
 /** Recursive type descriptor used by function signatures. */
 struct tra_ffic_type {
   /** Leaf kind. Function types use function_signature. */
@@ -108,13 +116,15 @@ struct tra_ffic_type {
   const tra_ffic_signature *function_signature;
 };
 
-/** Completion-first function signature. */
+/** Function signature with an explicit native ABI. */
 struct tra_ffic_signature {
-  /** Number of declared arguments, excluding the completion callback. */
+  /** Native ABI used by this signature. */
+  tra_ffic_signature_abi abi;
+  /** Number of declared logical arguments. */
   uint32_t arg_count;
   /** Argument type table. Void is not valid as an argument. */
   const tra_ffic_type *arg_types;
-  /** Completion result type. */
+  /** Logical return type. */
   const tra_ffic_type *return_type;
 };
 
@@ -208,9 +218,10 @@ static inline void tra_ffic_ignored_completion(
 /**
  * User function pointer with a signature described by tra_ffic_signature.
  *
- * Pure functions receive tra_ffic_completion followed by typed arguments.
- * Closure functions receive tra_ffic_completion, void *closure_state, then
- * typed arguments.
+ * Completion ABI pure functions receive tra_ffic_completion followed by typed
+ * arguments. Retval ABI pure functions return the signature return type
+ * directly. Closure callbacks receive void *closure_state after completion for
+ * completion ABI, or before typed arguments for retval ABI.
  */
 typedef void (*tra_ffic_user_function)(void);
 
@@ -560,7 +571,7 @@ static inline char *tra_ffic_string_duplicate(const char *value) {
   return copy;
 }
 
-/** Returns a void type descriptor for completion results. */
+/** Returns a void type descriptor for function results. */
 static inline tra_ffic_type tra_ffic_type_void(void) {
   tra_ffic_type type;
   type.kind = TRA_FFIC_TYPE_VOID;
@@ -912,6 +923,12 @@ static inline int tra_ffic_is_valid_kind(tra_ffic_type_kind kind) {
          kind == TRA_FFIC_TYPE_FUNCTION;
 }
 
+static inline int tra_ffic_is_valid_signature_abi(
+    tra_ffic_signature_abi abi) {
+  return abi == TRA_FFIC_SIGNATURE_ABI_COMPLETION ||
+         abi == TRA_FFIC_SIGNATURE_ABI_RETVAL;
+}
+
 static inline int tra_ffic_type_validate(const tra_ffic_type *type,
                                             bool allow_void,
                                             uint32_t depth,
@@ -924,6 +941,10 @@ static inline int tra_ffic_signature_validate(
   uint32_t index = 0u;
   if (signature == NULL) {
     tra_ffic_error_set(error, "Signature is null");
+    return 0;
+  }
+  if (!tra_ffic_is_valid_signature_abi(signature->abi)) {
+    tra_ffic_error_set(error, "Signature ABI is unsupported");
     return 0;
   }
   if (signature->arg_count > TRA_FFIC_MAX_ARG_COUNT) {
@@ -988,6 +1009,9 @@ static inline int tra_ffic_signature_equals(
   uint32_t index = 0u;
   if (first == NULL || second == NULL) {
     return first == second;
+  }
+  if (first->abi != second->abi) {
+    return 0;
   }
   if (first->arg_count != second->arg_count) {
     return 0;
@@ -1079,6 +1103,7 @@ static inline tra_ffic_signature *tra_ffic_signature_clone(
     tra_ffic_error_set(error, "Out of memory while cloning signature");
     return NULL;
   }
+  target->abi = source->abi;
   target->arg_count = source->arg_count;
   target->arg_types = arg_types;
   target->return_type = return_type;
@@ -1999,6 +2024,61 @@ static inline void *tra_ffic_arg_storage_value_address(
   return NULL;
 }
 
+static inline void tra_ffic_store_zero_return(const tra_ffic_type *return_type,
+                                              void *return_value) {
+  tra_ffic_buffer_view empty_view;
+  if (return_type == NULL || return_value == NULL) {
+    return;
+  }
+  switch (return_type->kind) {
+    case TRA_FFIC_TYPE_VOID:
+      return;
+    case TRA_FFIC_TYPE_BOOL:
+      *(uint8_t *)return_value = 0u;
+      return;
+    case TRA_FFIC_TYPE_INT8:
+      *(int8_t *)return_value = 0;
+      return;
+    case TRA_FFIC_TYPE_UINT8:
+      *(uint8_t *)return_value = 0u;
+      return;
+    case TRA_FFIC_TYPE_INT16:
+      *(int16_t *)return_value = 0;
+      return;
+    case TRA_FFIC_TYPE_UINT16:
+      *(uint16_t *)return_value = 0u;
+      return;
+    case TRA_FFIC_TYPE_INT32:
+      *(int32_t *)return_value = 0;
+      return;
+    case TRA_FFIC_TYPE_UINT32:
+      *(uint32_t *)return_value = 0u;
+      return;
+    case TRA_FFIC_TYPE_INT64:
+      *(int64_t *)return_value = 0;
+      return;
+    case TRA_FFIC_TYPE_UINT64:
+      *(uint64_t *)return_value = 0u;
+      return;
+    case TRA_FFIC_TYPE_FLOAT:
+      *(float *)return_value = 0.0f;
+      return;
+    case TRA_FFIC_TYPE_DOUBLE:
+      *(double *)return_value = 0.0;
+      return;
+    case TRA_FFIC_TYPE_BUFFER_VIEW:
+      empty_view.data = NULL;
+      empty_view.size = 0u;
+      *(tra_ffic_buffer_view *)return_value = empty_view;
+      return;
+    case TRA_FFIC_TYPE_POINTER:
+    case TRA_FFIC_TYPE_STRING:
+    case TRA_FFIC_TYPE_FUNCTION:
+      *(void **)return_value = NULL;
+      return;
+  }
+}
+
 static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
                                                  void *return_value,
                                                  void **args,
@@ -2014,23 +2094,35 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
   tra_ffic_value *raw_values = NULL;
   uint32_t index = 0u;
   uint32_t callback_offset = 0u;
+  uint32_t native_arg_offset = 0u;
+  bool uses_completion_abi = false;
+  void *callback_return_value = NULL;
   (void)cif;
-  (void)return_value;
   if (entry == NULL ||
       (entry->callback == NULL && entry->raw_closure_callback == NULL) ||
       entry->signature == NULL || args == NULL) {
     return;
   }
+  uses_completion_abi =
+      entry->signature->abi == TRA_FFIC_SIGNATURE_ABI_COMPLETION;
+  native_arg_offset = uses_completion_abi ? 1u : 0u;
+  if (!uses_completion_abi) {
+    tra_ffic_store_zero_return(entry->signature->return_type, return_value);
+  }
   active_entry = tra_ffic_entry_add_active_entry(entry, NULL);
   if (active_entry == NULL) {
     return;
   }
-  completion = *(tra_ffic_completion *)args[0];
-  storages =
-      (tra_ffic_arg_storage *)calloc(entry->callback_arg_count,
-                                     sizeof(*storages));
-  callback_values =
-      (void **)calloc(entry->callback_arg_count, sizeof(*callback_values));
+  if (uses_completion_abi) {
+    completion = *(tra_ffic_completion *)args[0];
+  }
+  if (entry->callback_arg_count > 0u) {
+    storages =
+        (tra_ffic_arg_storage *)calloc(entry->callback_arg_count,
+                                       sizeof(*storages));
+    callback_values =
+        (void **)calloc(entry->callback_arg_count, sizeof(*callback_values));
+  }
   if (entry->signature->arg_count > 0u) {
     protected_entries = (tra_ffic_registry_entry **)calloc(
         entry->signature->arg_count, sizeof(*protected_entries));
@@ -2039,7 +2131,8 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
                                             sizeof(*raw_values));
     }
   }
-  if (storages == NULL || callback_values == NULL ||
+  if ((entry->callback_arg_count > 0u &&
+       (storages == NULL || callback_values == NULL)) ||
       (entry->signature->arg_count > 0u && protected_entries == NULL) ||
       (entry->signature->arg_count > 0u &&
        entry->raw_closure_callback != NULL && raw_values == NULL)) {
@@ -2048,9 +2141,12 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
     }
     goto cleanup;
   }
-  storages[callback_offset].completion_value = completion;
-  callback_values[callback_offset] = &storages[callback_offset].completion_value;
-  callback_offset += 1u;
+  if (uses_completion_abi) {
+    storages[callback_offset].completion_value = completion;
+    callback_values[callback_offset] =
+        &storages[callback_offset].completion_value;
+    callback_offset += 1u;
+  }
   if (entry->passes_closure_state) {
     storages[callback_offset].pointer_value = entry->user_data;
     callback_values[callback_offset] = &storages[callback_offset].pointer_value;
@@ -2058,7 +2154,7 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
   }
   for (index = 0u; index < entry->signature->arg_count; ++index) {
     const tra_ffic_type *type = &entry->signature->arg_types[index];
-    void *raw_arg = args[index + 1u];
+    void *raw_arg = args[index + native_arg_offset];
     tra_ffic_arg_storage *storage = &storages[callback_offset + index];
     switch (type->kind) {
       case TRA_FFIC_TYPE_BOOL:
@@ -2215,6 +2311,12 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
   if (entry->raw_closure_callback != NULL) {
     entry->raw_closure_callback(completion, entry->user_data, raw_values,
                                 entry->signature->arg_count);
+  } else if (!uses_completion_abi) {
+    if (entry->signature->return_type->kind != TRA_FFIC_TYPE_VOID) {
+      callback_return_value = return_value;
+    }
+    ffi_call(&entry->callback_cif, FFI_FN(entry->callback),
+             callback_return_value, callback_values);
   } else {
     ffi_call(&entry->callback_cif, FFI_FN(entry->callback), NULL,
              callback_values);
@@ -2316,6 +2418,11 @@ static inline int tra_ffic_side_create_function(
   ffi_status status = FFI_OK;
   uint32_t index = 0u;
   bool use_direct_function = false;
+  bool uses_completion_abi = false;
+  uint32_t native_arg_offset = 0u;
+  uint32_t callback_arg_offset = 0u;
+  ffi_type *native_return_type = NULL;
+  ffi_type *callback_return_type = NULL;
   tra_ffic_native_function callback_function =
       (tra_ffic_native_function)callback;
   tra_ffic_error_clear(error);
@@ -2351,26 +2458,42 @@ static inline int tra_ffic_side_create_function(
   entry->finalize_user_data = finalize_user_data;
   entry->ref_count = 1u;
   entry->passes_closure_state = passes_closure_state;
-  entry->ffi_arg_count = entry->signature->arg_count + 1u;
-  entry->ffi_arg_types =
-      (ffi_type **)calloc(entry->ffi_arg_count, sizeof(*entry->ffi_arg_types));
-  if (entry->ffi_arg_types == NULL) {
+  uses_completion_abi =
+      entry->signature->abi == TRA_FFIC_SIGNATURE_ABI_COMPLETION;
+  native_arg_offset = uses_completion_abi ? 1u : 0u;
+  native_return_type = uses_completion_abi
+                           ? &ffi_type_void
+                           : tra_ffic_get_ffi_type(entry->signature->return_type,
+                                                   true);
+  if (native_return_type == NULL) {
     tra_ffic_registry_entry_destroy(entry);
-    tra_ffic_error_set(error, "Out of memory creating ffi argument table");
+    tra_ffic_error_set(error, "Unsupported closure return type");
     return 0;
   }
-  entry->ffi_arg_types[0] = &ffi_type_pointer;
+  entry->ffi_arg_count = entry->signature->arg_count + native_arg_offset;
+  if (entry->ffi_arg_count > 0u) {
+    entry->ffi_arg_types =
+        (ffi_type **)calloc(entry->ffi_arg_count, sizeof(*entry->ffi_arg_types));
+    if (entry->ffi_arg_types == NULL) {
+      tra_ffic_registry_entry_destroy(entry);
+      tra_ffic_error_set(error, "Out of memory creating ffi argument table");
+      return 0;
+    }
+  }
+  if (uses_completion_abi) {
+    entry->ffi_arg_types[0] = &ffi_type_pointer;
+  }
   for (index = 0u; index < entry->signature->arg_count; ++index) {
-    entry->ffi_arg_types[index + 1u] =
+    entry->ffi_arg_types[index + native_arg_offset] =
         tra_ffic_get_ffi_type(&entry->signature->arg_types[index], false);
-    if (entry->ffi_arg_types[index + 1u] == NULL) {
+    if (entry->ffi_arg_types[index + native_arg_offset] == NULL) {
       tra_ffic_registry_entry_destroy(entry);
       tra_ffic_error_set(error, "Unsupported closure argument type");
       return 0;
     }
   }
   status = ffi_prep_cif(&entry->cif, FFI_DEFAULT_ABI, entry->ffi_arg_count,
-                        &ffi_type_void, entry->ffi_arg_types);
+                        native_return_type, entry->ffi_arg_types);
   if (status != FFI_OK) {
     tra_ffic_registry_entry_destroy(entry);
     tra_ffic_error_set(error, "ffi_prep_cif failed for closure");
@@ -2381,31 +2504,46 @@ static inline int tra_ffic_side_create_function(
     *out_function = entry->raw;
     return 1;
   }
-  entry->callback_arg_count =
-      entry->signature->arg_count + (passes_closure_state ? 2u : 1u);
-  entry->callback_arg_types = (ffi_type **)calloc(
-      entry->callback_arg_count, sizeof(*entry->callback_arg_types));
-  if (entry->callback_arg_types == NULL) {
+  callback_return_type = uses_completion_abi
+                             ? &ffi_type_void
+                             : tra_ffic_get_ffi_type(
+                                   entry->signature->return_type, true);
+  if (callback_return_type == NULL) {
     tra_ffic_registry_entry_destroy(entry);
-    tra_ffic_error_set(error, "Out of memory creating ffi argument table");
+    tra_ffic_error_set(error, "Unsupported callback return type");
     return 0;
   }
-  entry->callback_arg_types[0] = &ffi_type_pointer;
+  entry->callback_arg_count =
+      entry->signature->arg_count + (uses_completion_abi ? 1u : 0u) +
+      (passes_closure_state ? 1u : 0u);
+  if (entry->callback_arg_count > 0u) {
+    entry->callback_arg_types = (ffi_type **)calloc(
+        entry->callback_arg_count, sizeof(*entry->callback_arg_types));
+    if (entry->callback_arg_types == NULL) {
+      tra_ffic_registry_entry_destroy(entry);
+      tra_ffic_error_set(error, "Out of memory creating ffi argument table");
+      return 0;
+    }
+  }
+  if (uses_completion_abi) {
+    entry->callback_arg_types[callback_arg_offset] = &ffi_type_pointer;
+    callback_arg_offset += 1u;
+  }
   if (passes_closure_state) {
-    entry->callback_arg_types[1] = &ffi_type_pointer;
+    entry->callback_arg_types[callback_arg_offset] = &ffi_type_pointer;
+    callback_arg_offset += 1u;
   }
   for (index = 0u; index < entry->signature->arg_count; ++index) {
-    entry->callback_arg_types[index + (passes_closure_state ? 2u : 1u)] =
+    entry->callback_arg_types[index + callback_arg_offset] =
         tra_ffic_get_callback_ffi_type(&entry->signature->arg_types[index]);
-    if (entry->callback_arg_types[index +
-                                  (passes_closure_state ? 2u : 1u)] == NULL) {
+    if (entry->callback_arg_types[index + callback_arg_offset] == NULL) {
       tra_ffic_registry_entry_destroy(entry);
       tra_ffic_error_set(error, "Unsupported callback argument type");
       return 0;
     }
   }
   status = ffi_prep_cif(&entry->callback_cif, FFI_DEFAULT_ABI,
-                        entry->callback_arg_count, &ffi_type_void,
+                        entry->callback_arg_count, callback_return_type,
                         entry->callback_arg_types);
   if (status != FFI_OK) {
     tra_ffic_registry_entry_destroy(entry);
@@ -2471,7 +2609,7 @@ static inline int tra_ffic_side_create_closure_impl(
  * Creates a raw stateful function pointer owned by side.
  *
  * callback receives decoded tra_ffic_value arguments instead of typed C
- * parameters, while the exposed closure still uses signature's native ABI.
+ * parameters. Raw closures support completion ABI signatures.
  */
 static inline int tra_ffic_side_create_raw_closure_impl(
     tra_ffic_side *side,
@@ -2491,6 +2629,13 @@ static inline int tra_ffic_side_create_raw_closure_impl(
     return 0;
   }
   *out_function = NULL;
+  if (!tra_ffic_signature_validate(signature, 0u, error)) {
+    return 0;
+  }
+  if (signature->abi == TRA_FFIC_SIGNATURE_ABI_RETVAL) {
+    tra_ffic_error_set(error, "Raw closure does not support retval ABI");
+    return 0;
+  }
   entry = (tra_ffic_registry_entry *)calloc(1u, sizeof(*entry));
   if (entry == NULL) {
     tra_ffic_error_set(error, "Out of memory creating raw closure");
@@ -3060,6 +3205,155 @@ static inline int tra_ffic_validate_and_store_arg(
   return 0;
 }
 
+static inline int tra_ffic_result_set_retval_from_storage(
+    tra_ffic_result *result,
+    const tra_ffic_type *return_type,
+    const tra_ffic_arg_storage *storage) {
+  if (result == NULL || return_type == NULL) {
+    return 0;
+  }
+  result->success = true;
+  result->error_message[0] = '\0';
+  if (return_type->kind != TRA_FFIC_TYPE_VOID && storage == NULL) {
+    return tra_ffic_result_set_error(result, "Return storage is null");
+  }
+  switch (return_type->kind) {
+    case TRA_FFIC_TYPE_VOID:
+      result->value = tra_ffic_value_void();
+      return 1;
+    case TRA_FFIC_TYPE_BOOL:
+      result->value = tra_ffic_value_bool(storage->bool_value != 0u);
+      return 1;
+    case TRA_FFIC_TYPE_INT8:
+      result->value = tra_ffic_value_int8(storage->int8_value);
+      return 1;
+    case TRA_FFIC_TYPE_UINT8:
+      result->value = tra_ffic_value_uint8(storage->uint8_value);
+      return 1;
+    case TRA_FFIC_TYPE_INT16:
+      result->value = tra_ffic_value_int16(storage->int16_value);
+      return 1;
+    case TRA_FFIC_TYPE_UINT16:
+      result->value = tra_ffic_value_uint16(storage->uint16_value);
+      return 1;
+    case TRA_FFIC_TYPE_INT32:
+      result->value = tra_ffic_value_int32(storage->int32_value);
+      return 1;
+    case TRA_FFIC_TYPE_UINT32:
+      result->value = tra_ffic_value_uint32(storage->uint32_value);
+      return 1;
+    case TRA_FFIC_TYPE_INT64:
+      result->value = tra_ffic_value_int64(storage->int64_value);
+      return 1;
+    case TRA_FFIC_TYPE_UINT64:
+      result->value = tra_ffic_value_uint64(storage->uint64_value);
+      return 1;
+    case TRA_FFIC_TYPE_FLOAT:
+      result->value = tra_ffic_value_float(storage->float_value);
+      return 1;
+    case TRA_FFIC_TYPE_DOUBLE:
+      result->value = tra_ffic_value_double(storage->double_value);
+      return 1;
+    case TRA_FFIC_TYPE_BUFFER_VIEW:
+      if (!tra_ffic_buffer_view_is_valid(&storage->buffer_view_value)) {
+        return tra_ffic_result_set_error(result, "Invalid buffer view");
+      }
+      result->value = tra_ffic_value_buffer_view(
+          storage->buffer_view_value.data, storage->buffer_view_value.size);
+      return 1;
+    case TRA_FFIC_TYPE_POINTER:
+      result->value = tra_ffic_value_pointer(storage->pointer_value);
+      return 1;
+    case TRA_FFIC_TYPE_STRING:
+      result->value = tra_ffic_value_string(storage->string_value);
+      return 1;
+    case TRA_FFIC_TYPE_FUNCTION:
+      result->value = tra_ffic_value_function(storage->function_value);
+      return 1;
+  }
+  return tra_ffic_result_set_error(result, "Retval type is unsupported");
+}
+
+static inline int tra_ffic_call_with_retval_result(
+    tra_ffic_side *caller_side,
+    const tra_ffic_function_ref *target_ref,
+    const tra_ffic_value *args,
+    uint32_t arg_count,
+    tra_ffic_result_callback result_callback,
+    void *result_user_data,
+    tra_ffic_error *error) {
+  tra_ffic_registry_entry *target_entry = NULL;
+  tra_ffic_registry_entry **protected_entries = NULL;
+  uint32_t protected_count = 0u;
+  tra_ffic_arg_storage *storages = NULL;
+  tra_ffic_arg_storage return_storage;
+  void **ffi_values = NULL;
+  void *return_address = NULL;
+  tra_ffic_result result;
+  uint32_t index = 0u;
+  int ok = 0;
+
+  memset(&return_storage, 0, sizeof(return_storage));
+  memset(&result, 0, sizeof(result));
+  target_entry = tra_ffic_entry_add_active(target_ref, error);
+  if (target_entry == NULL) {
+    return 0;
+  }
+  if (arg_count > 0u) {
+    protected_entries =
+        (tra_ffic_registry_entry **)calloc(arg_count,
+                                           sizeof(*protected_entries));
+    storages = (tra_ffic_arg_storage *)calloc(arg_count, sizeof(*storages));
+    ffi_values = (void **)calloc(arg_count, sizeof(*ffi_values));
+    if (protected_entries == NULL || storages == NULL || ffi_values == NULL) {
+      tra_ffic_error_set(error, "Out of memory preparing retval call");
+      goto cleanup;
+    }
+  }
+  for (index = 0u; index < arg_count; ++index) {
+    tra_ffic_registry_entry *protected_entry = NULL;
+    if (!tra_ffic_validate_and_store_arg(
+            caller_side, &target_ref->signature->arg_types[index],
+            &args[index], &storages[index], &protected_entry, error)) {
+      goto cleanup;
+    }
+    if (protected_entry != NULL) {
+      protected_entries[protected_count] = protected_entry;
+      protected_count += 1u;
+    }
+    ffi_values[index] = tra_ffic_arg_storage_value_address(
+        target_ref->signature->arg_types[index].kind, &storages[index]);
+    if (ffi_values[index] == NULL) {
+      tra_ffic_error_set(error, "Unsupported argument type");
+      goto cleanup;
+    }
+  }
+  if (target_ref->signature->return_type->kind != TRA_FFIC_TYPE_VOID) {
+    return_address = tra_ffic_arg_storage_value_address(
+        target_ref->signature->return_type->kind, &return_storage);
+    if (return_address == NULL) {
+      tra_ffic_error_set(error, "Unsupported return type");
+      goto cleanup;
+    }
+  }
+  ffi_call(&target_entry->cif, FFI_FN(target_ref->raw), return_address,
+           ffi_values);
+  (void)tra_ffic_result_set_retval_from_storage(
+      &result, target_ref->signature->return_type, &return_storage);
+  result_callback(result_user_data, &result);
+  ok = 1;
+
+cleanup:
+  for (index = 0u; index < protected_count; ++index) {
+    tra_ffic_entry_release_active(protected_entries[index]);
+  }
+  free(protected_entries);
+  free(storages);
+  free(ffi_values);
+  tra_ffic_entry_release_active(target_entry);
+  return ok;
+}
+
 /** Legacy internal helper for structured libffi calls. */
 static inline int tra_ffic_call_with_result(
     tra_ffic_side *caller_side,
@@ -3090,6 +3384,11 @@ static inline int tra_ffic_call_with_result(
   if (arg_count > 0u && args == NULL) {
     tra_ffic_error_set(error, "Argument table is null");
     return 0;
+  }
+  if (target_ref->signature->abi == TRA_FFIC_SIGNATURE_ABI_RETVAL) {
+    return tra_ffic_call_with_retval_result(
+        caller_side, target_ref, args, arg_count, result_callback,
+        result_user_data, error);
   }
   target_entry = tra_ffic_entry_add_active(target_ref, error);
   if (target_entry == NULL) {
