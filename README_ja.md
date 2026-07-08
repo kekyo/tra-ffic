@@ -71,7 +71,8 @@ int main(void) {
   // add関数のシグネチャを定義 `int32 (int32,int32)`
   tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {2u, arg_types, &return_type};
+  tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2u, arg_types, &return_type};
 
   // サイドBにadd関数を生成
   add_func function;
@@ -251,6 +252,8 @@ tra-fficで使用できる型は、関数ポインタを除くと、`void`、`bo
 - 関数ポインタ値も引数や戻り値として `NULL` を渡せます。`NULL` 関数ポインタは値として伝搬され、クロージャとして登録されません。
 - 完了値として返された文字列は、結果コールバックに渡す前に tra-ffic がコピーします。
 - 完了値として返された `buffer_view` は、指し示すバッファ本体をコピーせず、ビュー構造体だけをコピーします。
+- `TRA_FFIC_SIGNATURE_ABI_COMPLETION` は関数を `void(tra_ffic_completion, ...typed_args)` として公開します。
+- `TRA_FFIC_SIGNATURE_ABI_RETVAL` は関数を `return_type(...typed_args)` として公開します。同期実行専用で、v1では戻り値の `string`、`buffer_view`、`function` は借用値として扱います。
 
 - 完了関数のコールバックも、シグネチャの戻り値型に対応するCの値と `const tra_ffic_error *` を受け取ります。
 
@@ -266,17 +269,20 @@ tra_ffic_type arg_types[] = {
     tra_ffic_type_string(),
 };
 tra_ffic_type return_type = tra_ffic_type_string();
-tra_ffic_signature signature = {5u, arg_types, &return_type};
+tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 5u, arg_types, &return_type};
 ```
 
 - 関数シグネチャには関数名 (ここでは `foobar`) が含まれないことに注意して下さい。
 
-### 完了関数
+### 完了関数 (TRA_FFIC_SIGNATURE_ABI_COMPLETION)
 
-tra-ffic の関数は、戻り値を関数の戻り値で返すのではなく、 `tra_ffic_completion` 関数で結果を返します。
+tra-ffic の標準的な関数定義は `TRA_FFIC_SIGNATURE_ABI_COMPLETION` を使用します。
+これは、戻り値を関数の戻り値で返すのではなく、 `tra_ffic_completion` 関数で結果を返します。
 登録した関数は `completion` 関数を受け取り、処理が成功したら戻り値型に対応する値のアドレスを渡し、失敗したらエラーメッセージを渡します。
 
-この構造は、本来の関数の戻り値の扱いに対して複雑ですが、関数の非同期操作に対応できることと、戻り値が文字列 (`const char *`) の場合でも生存期間が明確な点が優れています。
+この構造は、本来の関数の戻り値の扱いに対して複雑ですが、関数の非同期操作に対応できることと、
+戻り値が文字列 (`const char *`) の場合でも生存期間が明確な点が優れています。
 
 ```c
 // 除算計算関数の例
@@ -316,6 +322,24 @@ static void do_nothing(tra_ffic_completion completion) {
 
 完了関数のコールバックは成功時に `error == NULL` を受け取り、失敗時に `const tra_ffic_error *` を受け取ります。
 失敗時の戻り値引数は型に対応するゼロ値または `NULL` です。
+
+### retval関数 (TRA_FFIC_SIGNATURE_ABI_RETVAL)
+
+単純な既存のC APIを呼び出す場合は、 `TRA_FFIC_SIGNATURE_ABI_RETVAL` を使用できます。
+但し、ネイティブ関数は戻り値で結果を直接返し、非同期完了や `tra_ffic_completion` 経由のエラー通知は行えません。
+
+```c
+typedef int32_t (*add_func)(int32_t a, int32_t b);
+
+static int32_t add(int32_t a, int32_t b) {
+  return a + b;
+}
+
+tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
+tra_ffic_type return_type = tra_ffic_type_int32();
+tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2u, arg_types, &return_type};
+```
 
 ### 関数ポインタ (クロージャ)
 
@@ -418,7 +442,8 @@ int main(void) {
   // add_offset関数のシグネチャを定義 `int32 (int32)`
   tra_ffic_type arg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {1u, arg_types, &return_type};
+  tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
 
   // サイドBにステートを含んだadd_offsetクロージャ関数を生成
   add_state state = {3};
@@ -455,10 +480,15 @@ int main(void) {
 }
 ```
 
+> 注釈: ここではシグネチャを `TRA_FFIC_SIGNATURE_ABI_COMPLETION` と想定して実装していますが、
+> `TRA_FFIC_SIGNATURE_ABI_RETVAL` で実装することも出来ます。
+
 クロージャ関数は、動的メモリ領域にその情報が保持されます。
 何もしない場合は、関数呼び出しが完了したとき（完了関数の呼び出しが完了したとき）に、自動的に解放されます。
+
 `tra_ffic_side_create_closure()` で得られたクロージャ関数は、内部の参照カウントが1になっているため、
 使用を終えたら `tra_ffic_function_release()` で解放する必要があります。
+
 同じサイド・シグネチャ・コールバック・ステート・finalizerで純粋関数またはクロージャを再度生成した場合、
 同じ関数ポインタが返ることがあります。
 この場合も生成が成功するたびに内部参照カウントは1つ増えるため、成功した生成回数と同じ回数だけ
@@ -527,10 +557,12 @@ int main(void) {
   // register_callback関数のシグネチャを定義 `int32 (void (*)(int32))`
   tra_ffic_type farg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type freturn_type = tra_ffic_type_void();
-  tra_ffic_signature fsignature = {1u, farg_types, &freturn_type};
+  tra_ffic_signature fsignature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, farg_types, &freturn_type};
   tra_ffic_type arg_types[] = { tra_ffic_type_function(&fsignature) };
   tra_ffic_type return_type = tra_ffic_type_void();
-  tra_ffic_signature signature = {1u, arg_types, &return_type};
+  tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
 
   // サイドBにregister_callback関数を生成
   register_callback_func function;
