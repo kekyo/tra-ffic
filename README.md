@@ -74,7 +74,8 @@ int main(void) {
   // Define the add function signature: `int32 (int32,int32)`.
   tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {2u, arg_types, &return_type};
+  tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2u, arg_types, &return_type};
 
   // Create the add function on side B.
   add_func function;
@@ -254,6 +255,8 @@ The types available in tra-ffic, excluding function pointers, are `void`, `bool`
 - Strings returned as completion values are copied by tra-ffic before being passed to the result callback.
 - Buffer views returned as completion values do not copy the pointed-to buffer; only the view structure is copied.
 - Completion-function callbacks also receive a C value corresponding to the signature's return type and a `const tra_ffic_error *`.
+- `TRA_FFIC_SIGNATURE_ABI_COMPLETION` exposes functions as `void(tra_ffic_completion, ...typed_args)`.
+- `TRA_FFIC_SIGNATURE_ABI_RETVAL` exposes functions as `return_type(...typed_args)`. It is synchronous only; returned `string`, `buffer_view`, and `function` values are borrowed in v1.
 
 The following example defines a function signature. Assume that an imaginary `foobar` function exists and that this is its signature:
 
@@ -268,14 +271,16 @@ tra_ffic_type arg_types[] = {
     tra_ffic_type_string(),
 };
 tra_ffic_type return_type = tra_ffic_type_string();
-tra_ffic_signature signature = {5u, arg_types, &return_type};
+tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 5u, arg_types, &return_type};
 ```
 
 - Note that the function signature does not include the function name (`foobar` here).
 
-### Completion Functions
+### Completion Functions (TRA_FFIC_SIGNATURE_ABI_COMPLETION)
 
-Functions in tra-ffic return results through a `tra_ffic_completion` function, not through the function's return value.
+The standard function definition in tra-ffic uses `TRA_FFIC_SIGNATURE_ABI_COMPLETION`.
+This returns results through a `tra_ffic_completion` function instead of the function's return value.
 A registered function receives a `completion` function. If the operation succeeds, pass the address of a value corresponding to the return type. If it fails, pass an error message.
 
 This structure is more complex than ordinary function return values, but it supports asynchronous operations and gives returned strings (`const char *`) a clear lifetime.
@@ -319,6 +324,24 @@ However, only the first call is adopted as the result. The second and later call
 
 The completion-function callback receives `error == NULL` on success and a `const tra_ffic_error *` on failure.
 On failure, the return-value argument is the zero value corresponding to the type, or `NULL`.
+
+### Retval Functions (TRA_FFIC_SIGNATURE_ABI_RETVAL)
+
+For simple existing C APIs, you can use `TRA_FFIC_SIGNATURE_ABI_RETVAL`.
+However, the native function returns its result directly and cannot complete asynchronously or report errors through `tra_ffic_completion`.
+
+```c
+typedef int32_t (*add_func)(int32_t a, int32_t b);
+
+static int32_t add(int32_t a, int32_t b) {
+  return a + b;
+}
+
+tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
+tra_ffic_type return_type = tra_ffic_type_int32();
+tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2u, arg_types, &return_type};
+```
 
 ### Function Pointers (Closures)
 
@@ -421,7 +444,8 @@ int main(void) {
   // Define the add_offset function signature: `int32 (int32)`.
   tra_ffic_type arg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {1u, arg_types, &return_type};
+  tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
 
   // Create an add_offset closure function with state on side B.
   add_state state = {3};
@@ -459,9 +483,14 @@ int main(void) {
 }
 ```
 
+> Note: This example assumes a `TRA_FFIC_SIGNATURE_ABI_COMPLETION` signature,
+> but it can also be implemented with `TRA_FFIC_SIGNATURE_ABI_RETVAL`.
+
 Closure functions store their information in dynamically allocated memory.
 If you do nothing, the function is automatically released when the function call completes, which means when the completion-function call completes.
+
 The closure function returned by `tra_ffic_side_create_closure()` has an internal reference count of 1, so it must be released with `tra_ffic_function_release()` after use.
+
 Creating a pure function or closure again with the same side, signature, callback, state, and finalizer may return the same function pointer.
 Each successful create still adds one internal retain, so call `tra_ffic_function_release()` once for each successful create.
 Calling `tra_ffic_function_retain()` or `tra_ffic_function_release()` with a `NULL` function pointer is accepted as a no-op.
@@ -528,10 +557,12 @@ int main(void) {
   // Define the register_callback function signature: `int32 (void (*)(int32))`.
   tra_ffic_type farg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type freturn_type = tra_ffic_type_void();
-  tra_ffic_signature fsignature = {1u, farg_types, &freturn_type};
+  tra_ffic_signature fsignature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, farg_types, &freturn_type};
   tra_ffic_type arg_types[] = { tra_ffic_type_function(&fsignature) };
   tra_ffic_type return_type = tra_ffic_type_void();
-  tra_ffic_signature signature = {1u, arg_types, &return_type};
+  tra_ffic_signature signature = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
 
   // Create the register_callback function on side B.
   register_callback_func function;

@@ -41,6 +41,14 @@ typedef void (*function_arg_func)(tra_ffic_completion completion,
 typedef void (*function_arg_arg_func)(tra_ffic_completion completion,
                                       function_arg_func callback);
 typedef void (*function_factory_func)(tra_ffic_completion completion);
+typedef void (*retval_void_func)(void);
+typedef int32_t (*retval_i32_func)(int32_t value);
+typedef int32_t (*retval_add_func)(int32_t a, int32_t b);
+typedef double (*retval_f64_func)(double value);
+typedef const char *(*retval_string_factory_func)(void);
+typedef tra_ffic_buffer_view (*retval_buffer_view_factory_func)(void);
+typedef retval_i32_func (*retval_function_factory_func)(void);
+typedef int32_t (*retval_function_arg_func)(retval_i32_func callback);
 typedef enum test_drain_mode {
   TEST_DRAIN_INLINE,
   TEST_DRAIN_THREAD,
@@ -71,8 +79,10 @@ typedef struct typed_capture {
   void *pointer_value;
   tra_ffic_buffer_view buffer_view_value;
   char string_value[128];
+  const char *string_pointer;
   int string_was_null;
   i32_func function_value;
+  tra_ffic_native_function native_function_value;
   int retain_function;
   int has_error;
   char error_message[TRA_FFIC_ERROR_MESSAGE_CAPACITY];
@@ -196,100 +206,131 @@ static const tra_ffic_type k_type_buffer_view = {
 static const tra_ffic_type k_sig_one_bool_args[] = {
     {TRA_FFIC_TYPE_BOOL, NULL}};
 static const tra_ffic_signature k_sig_echo_bool = {
-    1, k_sig_one_bool_args, &k_type_bool};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_bool_args, &k_type_bool};
 
 static const tra_ffic_type k_sig_one_i8_args[] = {
     {TRA_FFIC_TYPE_INT8, NULL}};
 static const tra_ffic_signature k_sig_echo_i8 = {
-    1, k_sig_one_i8_args, &k_type_i8};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i8_args, &k_type_i8};
 
 static const tra_ffic_type k_sig_one_u8_args[] = {
     {TRA_FFIC_TYPE_UINT8, NULL}};
 static const tra_ffic_signature k_sig_echo_u8 = {
-    1, k_sig_one_u8_args, &k_type_u8};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u8_args, &k_type_u8};
 
 static const tra_ffic_type k_sig_one_i16_args[] = {
     {TRA_FFIC_TYPE_INT16, NULL}};
 static const tra_ffic_signature k_sig_echo_i16 = {
-    1, k_sig_one_i16_args, &k_type_i16};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i16_args, &k_type_i16};
 
 static const tra_ffic_type k_sig_one_u16_args[] = {
     {TRA_FFIC_TYPE_UINT16, NULL}};
 static const tra_ffic_signature k_sig_echo_u16 = {
-    1, k_sig_one_u16_args, &k_type_u16};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u16_args, &k_type_u16};
 
 static const tra_ffic_type k_sig_one_i32_args[] = {
     {TRA_FFIC_TYPE_INT32, NULL}};
 static const tra_ffic_signature k_sig_echo_i32 = {
-    1, k_sig_one_i32_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i32_args, &k_type_i32};
 
 static const tra_ffic_type k_sig_two_i32_args[] = {
     {TRA_FFIC_TYPE_INT32, NULL},
     {TRA_FFIC_TYPE_INT32, NULL}};
 static const tra_ffic_signature k_sig_add_i32 = {
-    2, k_sig_two_i32_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2, k_sig_two_i32_args, &k_type_i32};
 
 static const tra_ffic_type k_sig_one_u32_args[] = {
     {TRA_FFIC_TYPE_UINT32, NULL}};
 static const tra_ffic_signature k_sig_echo_u32 = {
-    1, k_sig_one_u32_args, &k_type_u32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u32_args, &k_type_u32};
 
 static const tra_ffic_type k_sig_one_i64_args[] = {
     {TRA_FFIC_TYPE_INT64, NULL}};
 static const tra_ffic_signature k_sig_echo_i64 = {
-    1, k_sig_one_i64_args, &k_type_i64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i64_args, &k_type_i64};
 
 static const tra_ffic_type k_sig_one_u64_args[] = {
     {TRA_FFIC_TYPE_UINT64, NULL}};
 static const tra_ffic_signature k_sig_echo_u64 = {
-    1, k_sig_one_u64_args, &k_type_u64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u64_args, &k_type_u64};
 
 static const tra_ffic_type k_sig_one_f32_args[] = {
     {TRA_FFIC_TYPE_FLOAT, NULL}};
 static const tra_ffic_signature k_sig_echo_f32 = {
-    1, k_sig_one_f32_args, &k_type_f32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f32_args, &k_type_f32};
 
 static const tra_ffic_type k_sig_one_f64_args[] = {
     {TRA_FFIC_TYPE_DOUBLE, NULL}};
 static const tra_ffic_signature k_sig_echo_f64 = {
-    1, k_sig_one_f64_args, &k_type_f64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f64_args, &k_type_f64};
 
 static const tra_ffic_type k_sig_one_pointer_args[] = {
     {TRA_FFIC_TYPE_POINTER, NULL}};
 static const tra_ffic_signature k_sig_echo_pointer = {
-    1, k_sig_one_pointer_args, &k_type_pointer};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_pointer_args,
+    &k_type_pointer};
 
 static const tra_ffic_type k_sig_one_string_args[] = {
     {TRA_FFIC_TYPE_STRING, NULL}};
 static const tra_ffic_signature k_sig_echo_string = {
-    1, k_sig_one_string_args, &k_type_string};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_string_args,
+    &k_type_string};
 
 static const tra_ffic_type k_sig_one_buffer_view_args[] = {
     {TRA_FFIC_TYPE_BUFFER_VIEW, NULL}};
 static const tra_ffic_signature k_sig_echo_buffer_view = {
-    1, k_sig_one_buffer_view_args, &k_type_buffer_view};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_buffer_view_args,
+    &k_type_buffer_view};
 
-static const tra_ffic_signature k_sig_void = {0, NULL, &k_type_void};
-static const tra_ffic_signature k_sig_return_f32 = {0, NULL, &k_type_f32};
-static const tra_ffic_signature k_sig_return_i32 = {0, NULL, &k_type_i32};
-static const tra_ffic_signature k_sig_return_string = {0, NULL,
-                                                       &k_type_string};
-static const tra_ffic_signature k_sig_return_f64 = {0, NULL, &k_type_f64};
+static const tra_ffic_signature k_sig_void = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_void};
+static const tra_ffic_signature k_sig_return_f32 = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_f32};
+static const tra_ffic_signature k_sig_return_i32 = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_i32};
+static const tra_ffic_signature k_sig_return_string = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_string};
+static const tra_ffic_signature k_sig_return_f64 = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_f64};
 static const tra_ffic_signature k_sig_return_buffer_view = {
-    0, NULL, &k_type_buffer_view};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_buffer_view};
 
 static const tra_ffic_type k_type_i32_function = {
     TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32};
 static const tra_ffic_type k_sig_function_arg_args[] = {
     {TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32}};
 static const tra_ffic_signature k_sig_function_arg = {
-    1, k_sig_function_arg_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_function_arg_args,
+    &k_type_i32};
 static const tra_ffic_type k_sig_function_arg_arg_args[] = {
     {TRA_FFIC_TYPE_FUNCTION, &k_sig_function_arg}};
 static const tra_ffic_signature k_sig_function_arg_arg = {
-    1, k_sig_function_arg_arg_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_function_arg_arg_args,
+    &k_type_i32};
 static const tra_ffic_signature k_sig_return_function = {
-    0, NULL, &k_type_i32_function};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_i32_function};
+
+static const tra_ffic_signature k_retval_sig_add_i32 = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2, k_sig_two_i32_args, &k_type_i32};
+static const tra_ffic_signature k_retval_sig_echo_i32 = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_sig_one_i32_args, &k_type_i32};
+static const tra_ffic_signature k_retval_sig_echo_f64 = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_sig_one_f64_args, &k_type_f64};
+static const tra_ffic_signature k_retval_sig_void = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_void};
+static const tra_ffic_signature k_retval_sig_return_string = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_string};
+static const tra_ffic_signature k_retval_sig_return_buffer_view = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_buffer_view};
+static const tra_ffic_type k_type_retval_i32_function = {
+    TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32};
+static const tra_ffic_type k_retval_sig_function_arg_args[] = {
+    {TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32}};
+static const tra_ffic_signature k_retval_sig_function_arg = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_retval_sig_function_arg_args,
+    &k_type_i32};
+static const tra_ffic_signature k_retval_sig_return_function = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_retval_i32_function};
 
 static int expect_true(int condition, const char *message) {
   if (!condition) {
@@ -453,6 +494,7 @@ DEFINE_SUCCESS_CAPTURE(capture_i8_success_callback, int8_t, int8_value)
 DEFINE_SUCCESS_CAPTURE(capture_u8_success_callback, uint8_t, uint8_value)
 DEFINE_SUCCESS_CAPTURE(capture_i16_success_callback, int16_t, int16_value)
 DEFINE_SUCCESS_CAPTURE(capture_u16_success_callback, uint16_t, uint16_value)
+DEFINE_SUCCESS_CAPTURE(capture_i32_success_callback, int32_t, int32_value)
 DEFINE_SUCCESS_CAPTURE(capture_i64_success_callback, int64_t, int64_value)
 DEFINE_SUCCESS_CAPTURE(capture_u64_success_callback, uint64_t, uint64_value)
 DEFINE_SUCCESS_CAPTURE(capture_f32_success_callback, float, float_value)
@@ -495,6 +537,7 @@ static void capture_function_callback(void *user_data,
   typed_capture *capture = (typed_capture *)user_data;
   capture->count += 1;
   capture->function_value = result;
+  capture->native_function_value = (tra_ffic_native_function)result;
   capture_error(capture, error);
   if (error == NULL && capture->retain_function &&
       !tra_ffic_function_retain(result, &(tra_ffic_error){0})) {
@@ -565,6 +608,7 @@ static void capture_result_callback(void *user_data,
       capture->buffer_view_value = result->value.as.buffer_view_value;
       break;
     case TRA_FFIC_TYPE_STRING:
+      capture->string_pointer = result->value.as.string_value;
       if (result->value.as.string_value != NULL) {
         (void)snprintf(capture->string_value, sizeof(capture->string_value),
                        "%s", result->value.as.string_value);
@@ -574,6 +618,7 @@ static void capture_result_callback(void *user_data,
       break;
     case TRA_FFIC_TYPE_FUNCTION:
       capture->function_value = (i32_func)result->value.as.function_value;
+      capture->native_function_value = result->value.as.function_value;
       break;
   }
 }
@@ -1149,6 +1194,55 @@ static void return_function(tra_ffic_completion completion,
   completion(&function, NULL);
 }
 
+static const char k_retval_borrowed_string[] = "retval-borrowed";
+static uint8_t k_retval_buffer_data[] = {7u, 8u, 9u};
+static int g_retval_void_call_count = 0;
+
+static int32_t retval_add_i32_function(int32_t a, int32_t b) {
+  return a + b;
+}
+
+static int32_t retval_add_one_function(int32_t value) {
+  return value + 1;
+}
+
+static double retval_echo_f64_function(double value) {
+  return value;
+}
+
+static void retval_void_function(void) {
+  g_retval_void_call_count += 1;
+}
+
+static int32_t retval_closure_add_state_function(void *closure_state,
+                                                 int32_t value) {
+  const int32_t *offset = (const int32_t *)closure_state;
+  return value + *offset;
+}
+
+static const char *retval_return_string_function(void) {
+  return k_retval_borrowed_string;
+}
+
+static const char *retval_return_null_string_function(void) {
+  return NULL;
+}
+
+static tra_ffic_buffer_view retval_return_buffer_view_function(void) {
+  tra_ffic_buffer_view view;
+  view.data = k_retval_buffer_data;
+  view.size = sizeof(k_retval_buffer_data);
+  return view;
+}
+
+static retval_i32_func retval_return_function_closure(void *closure_state) {
+  return *(retval_i32_func *)closure_state;
+}
+
+static int32_t retval_accept_function(retval_i32_func callback) {
+  return callback(10);
+}
+
 static void three_level_set_message(
     char *message,
     const char *text) {
@@ -1346,6 +1440,7 @@ static void three_level_signature_set_init(
   int index = 0;
   memset(signature_set, 0, sizeof(*signature_set));
   signature_set->terminal_arg_types[0] = *terminal_arg_type;
+  signature_set->signatures[3].abi = TRA_FFIC_SIGNATURE_ABI_COMPLETION;
   signature_set->signatures[3].arg_count = 1u;
   signature_set->signatures[3].arg_types =
       signature_set->terminal_arg_types;
@@ -1356,11 +1451,13 @@ static void three_level_signature_set_init(
     if (pattern[index] == 'A') {
       signature_set->arg_types[index][0] =
           signature_set->function_types[index + 1];
+      signature_set->signatures[index].abi = TRA_FFIC_SIGNATURE_ABI_COMPLETION;
       signature_set->signatures[index].arg_count = 1u;
       signature_set->signatures[index].arg_types =
           signature_set->arg_types[index];
       signature_set->signatures[index].return_type = terminal_return_type;
     } else {
+      signature_set->signatures[index].abi = TRA_FFIC_SIGNATURE_ABI_COMPLETION;
       signature_set->signatures[index].arg_count = 0u;
       signature_set->signatures[index].arg_types = NULL;
       signature_set->signatures[index].return_type =
@@ -2301,6 +2398,337 @@ static int run_success_scalar_call_test(test_drain_mode drain_mode) {
 
 #undef RUN_SUCCESS_CALL_CASE
 
+  passed = test_context_destroy(&context) && passed;
+  return passed;
+}
+
+static int run_retval_abi_test(test_drain_mode drain_mode) {
+  test_context context;
+  tra_ffic_error error;
+  typed_capture capture;
+  tra_ffic_function_ref target_ref;
+  tra_ffic_value add_args[2];
+  tra_ffic_value one_arg[1];
+  retval_add_func add_function = NULL;
+  retval_i32_func offset_function = NULL;
+  retval_i32_func add_one_function_ptr = NULL;
+  retval_f64_func f64_function = NULL;
+  retval_void_func void_function = NULL;
+  retval_string_factory_func string_function = NULL;
+  retval_string_factory_func null_string_function = NULL;
+  retval_buffer_view_factory_func buffer_view_function = NULL;
+  retval_function_factory_func function_factory = NULL;
+  retval_function_arg_func function_arg = NULL;
+  retval_i32_func raw_rejected = NULL;
+  i32_func completion_add_one = NULL;
+  union {
+    i32_func completion;
+    retval_i32_func retval;
+  } mismatched_function;
+  int32_t offset = 10;
+  int32_t result = 0;
+  int passed = 1;
+
+  if (!test_context_init(&context, drain_mode)) {
+    return 0;
+  }
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_add_i32,
+                           retval_add_i32_function, &add_function, &error),
+                       error.message) &&
+           passed;
+  if (add_function != NULL) {
+    passed = expect_true(add_function(40, 2) == 42,
+                         "retval pure function result mismatch") &&
+             passed;
+  }
+
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &k_retval_sig_echo_i32,
+                           retval_closure_add_state_function, &offset, NULL,
+                           &offset_function, &error),
+                       error.message) &&
+           passed;
+  if (offset_function != NULL) {
+    passed = expect_true(offset_function(32) == 42,
+                         "retval closure result mismatch") &&
+             passed;
+  }
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_echo_f64,
+                           retval_echo_f64_function, &f64_function, &error),
+                       error.message) &&
+           passed;
+  if (f64_function != NULL) {
+    passed = expect_true(isnan(f64_function(NAN)),
+                         "retval double nan was not preserved") &&
+             passed;
+    passed = expect_true(is_positive_infinity_double(f64_function(INFINITY)),
+                         "retval double infinity was not preserved") &&
+             passed;
+  }
+
+  g_retval_void_call_count = 0;
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_void,
+                           retval_void_function, &void_function, &error),
+                       error.message) &&
+           passed;
+  if (void_function != NULL) {
+    void_function();
+    passed = expect_true(g_retval_void_call_count == 1,
+                         "retval void function was not called") &&
+             passed;
+  }
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_return_string,
+                           retval_return_string_function, &string_function,
+                           &error),
+                       error.message) &&
+           passed;
+  if (string_function != NULL) {
+    passed = expect_true(string_function() == k_retval_borrowed_string,
+                         "retval string was not borrowed") &&
+             passed;
+  }
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_return_string,
+                           retval_return_null_string_function,
+                           &null_string_function, &error),
+                       error.message) &&
+           passed;
+  if (null_string_function != NULL) {
+    passed = expect_true(null_string_function() == NULL,
+                         "retval null string was not preserved") &&
+             passed;
+  }
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_return_buffer_view,
+                           retval_return_buffer_view_function,
+                           &buffer_view_function, &error),
+                       error.message) &&
+           passed;
+  if (buffer_view_function != NULL) {
+    tra_ffic_buffer_view view = buffer_view_function();
+    passed = expect_true(view.data == k_retval_buffer_data &&
+                             view.size == sizeof(k_retval_buffer_data),
+                         "retval buffer view mismatch") &&
+             passed;
+  }
+
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  add_args[0] = tra_ffic_value_int32(20);
+  add_args[1] = tra_ffic_value_int32(22);
+  target_ref.raw = (tra_ffic_native_function)add_function;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &k_retval_sig_add_i32;
+  passed = expect_true(tra_ffic_call_with_result(
+                           &context.side_a, &target_ref, add_args, 2u,
+                           capture_result_callback, &capture, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.int32_value == 42,
+                       "retval structured result mismatch") &&
+           passed;
+
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  one_arg[0] = tra_ffic_value_int32(32);
+  target_ref.raw = (tra_ffic_native_function)offset_function;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &k_retval_sig_echo_i32;
+  passed = expect_true(tra_ffic_call(&context.side_a, &target_ref, one_arg, 1u,
+                                     capture_i32_success_callback, &capture,
+                                     &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(capture.count == 1 && capture.int32_value == 42,
+                       "retval success call result mismatch") &&
+           passed;
+
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  target_ref.raw = (tra_ffic_native_function)string_function;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &k_retval_sig_return_string;
+  passed = expect_true(tra_ffic_call_with_result(
+                           &context.side_a, &target_ref, NULL, 0u,
+                           capture_result_callback, &capture, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.string_pointer == k_retval_borrowed_string &&
+                           strcmp(capture.string_value,
+                                  k_retval_borrowed_string) == 0,
+                       "retval structured string mismatch") &&
+           passed;
+
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  target_ref.raw = (tra_ffic_native_function)null_string_function;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &k_retval_sig_return_string;
+  passed = expect_true(tra_ffic_call_with_result(
+                           &context.side_a, &target_ref, NULL, 0u,
+                           capture_result_callback, &capture, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.string_was_null,
+                       "retval structured null string mismatch") &&
+           passed;
+
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  target_ref.raw = (tra_ffic_native_function)buffer_view_function;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &k_retval_sig_return_buffer_view;
+  passed = expect_true(tra_ffic_call_with_result(
+                           &context.side_a, &target_ref, NULL, 0u,
+                           capture_result_callback, &capture, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.buffer_view_value.data ==
+                               k_retval_buffer_data &&
+                           capture.buffer_view_value.size ==
+                               sizeof(k_retval_buffer_data),
+                       "retval structured buffer view mismatch") &&
+           passed;
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_a, &k_retval_sig_echo_i32,
+                           retval_add_one_function, &add_one_function_ptr,
+                           &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &k_retval_sig_return_function,
+                           retval_return_function_closure,
+                           &add_one_function_ptr, NULL, &function_factory,
+                           &error),
+                       error.message) &&
+           passed;
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  target_ref.raw = (tra_ffic_native_function)function_factory;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &k_retval_sig_return_function;
+  passed = expect_true(tra_ffic_call_with_result(
+                           &context.side_a, &target_ref, NULL, 0u,
+                           capture_result_callback, &capture, &error),
+                       error.message) &&
+           passed;
+  if (capture.native_function_value != NULL) {
+    retval_i32_func returned =
+        (retval_i32_func)capture.native_function_value;
+    passed = expect_true(capture.count == 1 && !capture.has_error &&
+                             returned(41) == 42,
+                         "retval structured function return mismatch") &&
+             passed;
+  } else {
+    passed = expect_true(0, "retval structured function return was null") &&
+             passed;
+  }
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_function_arg,
+                           retval_accept_function, &function_arg, &error),
+                       error.message) &&
+           passed;
+  if (function_arg != NULL && add_one_function_ptr != NULL) {
+    result = function_arg(add_one_function_ptr);
+    passed = expect_true(result == 11,
+                         "retval function argument result mismatch") &&
+             passed;
+  }
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_a, &k_sig_echo_i32, add_one_function,
+                           &completion_add_one, &error),
+                       error.message) &&
+           passed;
+  if (function_arg != NULL && completion_add_one != NULL) {
+    mismatched_function.completion = completion_add_one;
+    result = function_arg(mismatched_function.retval);
+    passed = expect_true(result == 0,
+                         "retval function argument ABI mismatch was accepted") &&
+             passed;
+  }
+
+  passed = expect_true(!tra_ffic_side_create_raw_closure(
+                           &context.side_b, &k_retval_sig_echo_i32,
+                           accept_function_raw, NULL, NULL, &raw_rejected,
+                           &error),
+                       "retval raw closure unexpectedly succeeded") &&
+           passed;
+  passed = expect_true(strstr(error.message, "retval ABI") != NULL,
+                       "retval raw closure error message mismatch") &&
+           passed;
+
+  if (completion_add_one != NULL) {
+    passed = expect_true(tra_ffic_function_release(completion_add_one, &error),
+                         error.message) &&
+             passed;
+  }
+  if (function_arg != NULL) {
+    passed = expect_true(tra_ffic_function_release(function_arg, &error),
+                         error.message) &&
+             passed;
+  }
+  if (function_factory != NULL) {
+    passed = expect_true(tra_ffic_function_release(function_factory, &error),
+                         error.message) &&
+             passed;
+  }
+  if (add_one_function_ptr != NULL) {
+    passed = expect_true(tra_ffic_function_release(add_one_function_ptr, &error),
+                         error.message) &&
+             passed;
+  }
+  if (buffer_view_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(buffer_view_function, &error),
+                         error.message) &&
+             passed;
+  }
+  if (null_string_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(null_string_function, &error),
+                         error.message) &&
+             passed;
+  }
+  if (string_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(string_function, &error),
+                         error.message) &&
+             passed;
+  }
+  if (void_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(void_function, &error),
+                         error.message) &&
+             passed;
+  }
+  if (f64_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(f64_function, &error),
+                         error.message) &&
+             passed;
+  }
+  if (offset_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(offset_function, &error),
+                         error.message) &&
+             passed;
+  }
+  if (add_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(add_function, &error),
+                         error.message) &&
+             passed;
+  }
+
+  passed = test_context_drain(&context) && passed;
   passed = test_context_destroy(&context) && passed;
   return passed;
 }
@@ -4082,6 +4510,7 @@ static int run_regression_test(test_drain_mode drain_mode) {
   passed = passed && run_closure_scalar_test(drain_mode);
   passed = passed && run_structured_scalar_call_test(drain_mode);
   passed = passed && run_success_scalar_call_test(drain_mode);
+  passed = passed && run_retval_abi_test(drain_mode);
   passed = passed && run_buffer_view_test(drain_mode);
   passed = passed && run_completion_behavior_test(drain_mode);
   passed = passed && run_async_completion_test(drain_mode);
