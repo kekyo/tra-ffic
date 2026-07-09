@@ -36,14 +36,21 @@ typedef void (*buffer_view_func)(tra_ffic_completion completion,
 typedef void (*add_func)(tra_ffic_completion completion,
                          int32_t a,
                          int32_t b);
+typedef void (*args_add_func)(tra_ffic_completion completion,
+                              const void *const *args);
+typedef void (*args_i32_func)(tra_ffic_completion completion,
+                              const void *const *args);
 typedef void (*function_arg_func)(tra_ffic_completion completion,
                                   i32_func callback);
+typedef void (*args_function_arg_func)(tra_ffic_completion completion,
+                                       args_i32_func callback);
 typedef void (*function_arg_arg_func)(tra_ffic_completion completion,
                                       function_arg_func callback);
 typedef void (*function_factory_func)(tra_ffic_completion completion);
 typedef void (*retval_void_func)(void);
 typedef int32_t (*retval_i32_func)(int32_t value);
 typedef int32_t (*retval_add_func)(int32_t a, int32_t b);
+typedef int32_t (*retval_args_add_func)(const void *const *args);
 typedef double (*retval_f64_func)(double value);
 typedef const char *(*retval_string_factory_func)(void);
 typedef tra_ffic_buffer_view (*retval_buffer_view_factory_func)(void);
@@ -206,131 +213,165 @@ static const tra_ffic_type k_type_buffer_view = {
 static const tra_ffic_type k_sig_one_bool_args[] = {
     {TRA_FFIC_TYPE_BOOL, NULL}};
 static const tra_ffic_signature k_sig_echo_bool = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_bool_args, &k_type_bool};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_bool_args, &k_type_bool, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i8_args[] = {
     {TRA_FFIC_TYPE_INT8, NULL}};
 static const tra_ffic_signature k_sig_echo_i8 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i8_args, &k_type_i8};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i8_args, &k_type_i8, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_u8_args[] = {
     {TRA_FFIC_TYPE_UINT8, NULL}};
 static const tra_ffic_signature k_sig_echo_u8 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u8_args, &k_type_u8};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u8_args, &k_type_u8, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i16_args[] = {
     {TRA_FFIC_TYPE_INT16, NULL}};
 static const tra_ffic_signature k_sig_echo_i16 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i16_args, &k_type_i16};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i16_args, &k_type_i16, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_u16_args[] = {
     {TRA_FFIC_TYPE_UINT16, NULL}};
 static const tra_ffic_signature k_sig_echo_u16 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u16_args, &k_type_u16};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u16_args, &k_type_u16, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i32_args[] = {
     {TRA_FFIC_TYPE_INT32, NULL}};
 static const tra_ffic_signature k_sig_echo_i32 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i32_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i32_args, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_two_i32_args[] = {
     {TRA_FFIC_TYPE_INT32, NULL},
     {TRA_FFIC_TYPE_INT32, NULL}};
 static const tra_ffic_signature k_sig_add_i32 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2, k_sig_two_i32_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2, k_sig_two_i32_args, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
+static const tra_ffic_signature k_sig_args_add_i32 = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    2,
+    k_sig_two_i32_args,
+    &k_type_i32,
+    TRA_FFIC_ARGUMENT_PASSING_POINTER_LIST};
 
 static const tra_ffic_type k_sig_one_u32_args[] = {
     {TRA_FFIC_TYPE_UINT32, NULL}};
 static const tra_ffic_signature k_sig_echo_u32 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u32_args, &k_type_u32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u32_args, &k_type_u32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i64_args[] = {
     {TRA_FFIC_TYPE_INT64, NULL}};
 static const tra_ffic_signature k_sig_echo_i64 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i64_args, &k_type_i64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i64_args, &k_type_i64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_u64_args[] = {
     {TRA_FFIC_TYPE_UINT64, NULL}};
 static const tra_ffic_signature k_sig_echo_u64 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u64_args, &k_type_u64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u64_args, &k_type_u64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_f32_args[] = {
     {TRA_FFIC_TYPE_FLOAT, NULL}};
 static const tra_ffic_signature k_sig_echo_f32 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f32_args, &k_type_f32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f32_args, &k_type_f32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_f64_args[] = {
     {TRA_FFIC_TYPE_DOUBLE, NULL}};
 static const tra_ffic_signature k_sig_echo_f64 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f64_args, &k_type_f64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f64_args, &k_type_f64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_pointer_args[] = {
     {TRA_FFIC_TYPE_POINTER, NULL}};
 static const tra_ffic_signature k_sig_echo_pointer = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_pointer_args,
-    &k_type_pointer};
+    &k_type_pointer, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_string_args[] = {
     {TRA_FFIC_TYPE_STRING, NULL}};
 static const tra_ffic_signature k_sig_echo_string = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_string_args,
-    &k_type_string};
+    &k_type_string, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_buffer_view_args[] = {
     {TRA_FFIC_TYPE_BUFFER_VIEW, NULL}};
 static const tra_ffic_signature k_sig_echo_buffer_view = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_buffer_view_args,
-    &k_type_buffer_view};
+    &k_type_buffer_view, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_signature k_sig_void = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_void};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_void, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_return_f32 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_f32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_f32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_return_i32 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_return_string = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_string};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_string, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_return_f64 = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_f64};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_f64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_return_buffer_view = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_buffer_view};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_buffer_view, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_type_i32_function = {
     TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32};
+static const tra_ffic_signature k_sig_args_echo_i32 = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    1,
+    k_sig_one_i32_args,
+    &k_type_i32,
+    TRA_FFIC_ARGUMENT_PASSING_POINTER_LIST};
+static const tra_ffic_type k_type_args_i32_function = {
+    TRA_FFIC_TYPE_FUNCTION, &k_sig_args_echo_i32};
 static const tra_ffic_type k_sig_function_arg_args[] = {
     {TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32}};
 static const tra_ffic_signature k_sig_function_arg = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_function_arg_args,
-    &k_type_i32};
+    &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
+static const tra_ffic_type k_sig_args_function_arg_args[] = {
+    {TRA_FFIC_TYPE_FUNCTION, &k_sig_args_echo_i32}};
+static const tra_ffic_signature k_sig_args_function_arg = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    1,
+    k_sig_args_function_arg_args,
+    &k_type_i32,
+    TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_type k_sig_function_arg_arg_args[] = {
     {TRA_FFIC_TYPE_FUNCTION, &k_sig_function_arg}};
 static const tra_ffic_signature k_sig_function_arg_arg = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_function_arg_arg_args,
-    &k_type_i32};
+    &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_return_function = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_i32_function};
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_i32_function, TRA_FFIC_ARGUMENT_PASSING_STACK};
+static const tra_ffic_signature k_sig_return_args_function = {
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    0,
+    NULL,
+    &k_type_args_i32_function,
+    TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_signature k_retval_sig_add_i32 = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2, k_sig_two_i32_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2, k_sig_two_i32_args, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
+static const tra_ffic_signature k_retval_sig_args_add_i32 = {
+    TRA_FFIC_SIGNATURE_ABI_RETVAL,
+    2,
+    k_sig_two_i32_args,
+    &k_type_i32,
+    TRA_FFIC_ARGUMENT_PASSING_POINTER_LIST};
 static const tra_ffic_signature k_retval_sig_echo_i32 = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_sig_one_i32_args, &k_type_i32};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_sig_one_i32_args, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_retval_sig_echo_f64 = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_sig_one_f64_args, &k_type_f64};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_sig_one_f64_args, &k_type_f64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_retval_sig_void = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_void};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_void, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_retval_sig_return_string = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_string};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_string, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_retval_sig_return_buffer_view = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_buffer_view};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_buffer_view, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_type k_type_retval_i32_function = {
     TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32};
 static const tra_ffic_type k_retval_sig_function_arg_args[] = {
     {TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32}};
 static const tra_ffic_signature k_retval_sig_function_arg = {
     TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_retval_sig_function_arg_args,
-    &k_type_i32};
+    &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_retval_sig_return_function = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_retval_i32_function};
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_retval_i32_function, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static int expect_true(int condition, const char *message) {
   if (!condition) {
@@ -544,6 +585,21 @@ static void capture_function_callback(void *user_data,
     capture->has_error = 1;
     (void)snprintf(capture->error_message, sizeof(capture->error_message),
                    "%s", "failed to retain function result");
+  }
+}
+
+static void capture_args_function_callback(void *user_data,
+                                           args_i32_func result,
+                                           const tra_ffic_error *error) {
+  typed_capture *capture = (typed_capture *)user_data;
+  capture->count += 1;
+  capture->native_function_value = (tra_ffic_native_function)result;
+  capture_error(capture, error);
+  if (error == NULL && capture->retain_function &&
+      !tra_ffic_function_retain(result, &(tra_ffic_error){0})) {
+    capture->has_error = 1;
+    (void)snprintf(capture->error_message, sizeof(capture->error_message),
+                   "%s", "failed to retain args function result");
   }
 }
 
@@ -863,6 +919,24 @@ static void add_i32_function(tra_ffic_completion completion,
   completion(&result, NULL);
 }
 
+static void add_i32_pointer_list_function(tra_ffic_completion completion,
+                                          const void *const *args) {
+  const int32_t a = *(const int32_t *)args[0];
+  const int32_t b = *(const int32_t *)args[1];
+  int32_t result = a + b;
+  completion(&result, NULL);
+}
+
+static void add_i32_pointer_list_closure(tra_ffic_completion completion,
+                                         void *closure_state,
+                                         const void *const *args) {
+  const int32_t *offset = (const int32_t *)closure_state;
+  const int32_t a = *(const int32_t *)args[0];
+  const int32_t b = *(const int32_t *)args[1];
+  int32_t result = *offset + a + b;
+  completion(&result, NULL);
+}
+
 static void echo_u32_function(tra_ffic_completion completion, uint32_t value) {
   completion(&value, NULL);
 }
@@ -1060,6 +1134,45 @@ static void accept_function_pure(tra_ffic_completion completion,
   completion(&result, NULL);
 }
 
+static void call_args_function(tra_ffic_completion completion,
+                               void *closure_state,
+                               args_i32_func function) {
+  nested_callback_state *state = (nested_callback_state *)closure_state;
+  typed_capture capture;
+  tra_ffic_completion nested_completion = NULL;
+  tra_ffic_error error;
+  int32_t arg = 41;
+  const void *args[1];
+  int32_t value = 0;
+  memset(&capture, 0, sizeof(capture));
+  if (!tra_ffic_side_create_completion_function(
+          state->caller_side, &k_type_i32, capture_i32_callback,
+          &nested_completion, &capture, &error)) {
+    completion(NULL, error.message);
+    return;
+  }
+  args[0] = &arg;
+  function(nested_completion, args);
+  if (!test_task_queue_drain(state->queue, state->drain_mode)) {
+    completion(NULL, "args nested drain failed");
+    return;
+  }
+  if (!tra_ffic_function_release(nested_completion, &error)) {
+    completion(NULL, error.message);
+    return;
+  }
+  if (!test_task_queue_drain(state->queue, state->drain_mode)) {
+    completion(NULL, "args nested cleanup drain failed");
+    return;
+  }
+  if (capture.count != 1 || capture.has_error) {
+    completion(NULL, "args nested call failed");
+    return;
+  }
+  value = capture.int32_value;
+  completion(&value, NULL);
+}
+
 static void accept_function_raw(tra_ffic_completion completion,
                                 void *closure_state,
                                 const tra_ffic_value *args,
@@ -1199,6 +1312,13 @@ static uint8_t k_retval_buffer_data[] = {7u, 8u, 9u};
 static int g_retval_void_call_count = 0;
 
 static int32_t retval_add_i32_function(int32_t a, int32_t b) {
+  return a + b;
+}
+
+static int32_t retval_add_i32_pointer_list_function(
+    const void *const *args) {
+  const int32_t a = *(const int32_t *)args[0];
+  const int32_t b = *(const int32_t *)args[1];
   return a + b;
 }
 
@@ -3321,6 +3441,274 @@ static int run_async_completion_test(test_drain_mode drain_mode) {
   return passed;
 }
 
+static int run_pointer_list_argument_passing_test(
+    test_drain_mode drain_mode) {
+  test_context context;
+  tra_ffic_error error;
+  typed_capture capture;
+  add_func stack_to_args = NULL;
+  add_func stack_to_args_closure = NULL;
+  args_add_func args_to_stack = NULL;
+  retval_add_func retval_stack_to_args = NULL;
+  retval_args_add_func retval_args_to_stack = NULL;
+  i32_func add_one = NULL;
+  args_function_arg_func accept_args_function = NULL;
+  function_factory_func args_factory = NULL;
+  args_i32_func returned_args_function = NULL;
+  tra_ffic_completion completion = NULL;
+  int32_t first = 19;
+  int32_t second = 23;
+  int32_t value = 41;
+  int32_t offset = 10;
+  const void *two_args[2];
+  const void *one_arg[1];
+  nested_callback_state nested_state;
+  union {
+    i32_func stack;
+    args_i32_func args;
+  } adapted_function;
+  int passed = 1;
+  if (!test_context_init(&context, drain_mode)) {
+    return 0;
+  }
+  two_args[0] = &first;
+  two_args[1] = &second;
+  one_arg[0] = &value;
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_pure_pointer_list_function(
+                           &context.side_b, &k_sig_add_i32,
+                           add_i32_pointer_list_function, &stack_to_args,
+                           &error),
+                       error.message);
+  memset(&capture, 0, sizeof(capture));
+  passed = passed &&
+           expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &k_type_i32,
+                           capture_i32_callback, &completion, &capture,
+                           &error),
+                       error.message);
+  stack_to_args(completion, first, second);
+  passed = test_context_drain(&context) && passed;
+  passed = passed &&
+           expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.int32_value == 42,
+                       "stack caller to pointer-list callee failed");
+  passed = passed &&
+           expect_true(tra_ffic_function_release(completion, &error),
+                       error.message);
+  completion = NULL;
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_pointer_list_closure(
+                           &context.side_b, &k_sig_add_i32,
+                           add_i32_pointer_list_closure, &offset, NULL,
+                           &stack_to_args_closure, &error),
+                       error.message);
+  memset(&capture, 0, sizeof(capture));
+  passed = passed &&
+           expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &k_type_i32,
+                           capture_i32_callback, &completion, &capture,
+                           &error),
+                       error.message);
+  stack_to_args_closure(completion, 10, 22);
+  passed = test_context_drain(&context) && passed;
+  passed = passed &&
+           expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.int32_value == 42,
+                       "stack caller to pointer-list closure failed");
+  passed = passed &&
+           expect_true(tra_ffic_function_release(completion, &error),
+                       error.message);
+  completion = NULL;
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_sig_args_add_i32,
+                           add_i32_function, &args_to_stack, &error),
+                       error.message);
+  memset(&capture, 0, sizeof(capture));
+  passed = passed &&
+           expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &k_type_i32,
+                           capture_i32_callback, &completion, &capture,
+                           &error),
+                       error.message);
+  args_to_stack(completion, two_args);
+  passed = test_context_drain(&context) && passed;
+  passed = passed &&
+           expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.int32_value == 42,
+                       "pointer-list caller to stack callee failed");
+  passed = passed &&
+           expect_true(tra_ffic_function_release(completion, &error),
+                       error.message);
+  completion = NULL;
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_pure_pointer_list_function(
+                           &context.side_b, &k_retval_sig_add_i32,
+                           retval_add_i32_pointer_list_function,
+                           &retval_stack_to_args, &error),
+                       error.message);
+  if (retval_stack_to_args != NULL) {
+    passed = passed &&
+             expect_true(retval_stack_to_args(first, second) == 42,
+                         "retval stack caller to pointer-list callee failed");
+  }
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &k_retval_sig_args_add_i32,
+                           retval_add_i32_function, &retval_args_to_stack,
+                           &error),
+                       error.message);
+  if (retval_args_to_stack != NULL) {
+    passed = passed &&
+             expect_true(retval_args_to_stack(two_args) == 42,
+                         "retval pointer-list caller to stack callee failed");
+  }
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_a, &k_sig_echo_i32,
+                           add_one_function, &add_one, &error),
+                       error.message);
+  nested_state.caller_side = &context.side_b;
+  nested_state.queue = &context.queue;
+  nested_state.drain_mode = drain_mode;
+  passed = passed &&
+           expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &k_sig_args_function_arg,
+                           call_args_function, &nested_state, NULL,
+                           &accept_args_function, &error),
+                       error.message);
+  memset(&capture, 0, sizeof(capture));
+  passed = passed &&
+           expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &k_type_i32,
+                           capture_i32_callback, &completion, &capture,
+                           &error),
+                       error.message);
+  adapted_function.stack = add_one;
+  accept_args_function(completion, adapted_function.args);
+  passed = test_context_drain(&context) && passed;
+  passed = passed &&
+           expect_true(capture.count == 1 && !capture.has_error &&
+                           capture.int32_value == 42,
+                       "pointer-list function argument adapter failed");
+  passed = passed &&
+           expect_true(tra_ffic_function_release(completion, &error),
+                       error.message);
+  completion = NULL;
+
+  passed = passed &&
+           expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &k_sig_return_args_function,
+                           return_function, &add_one, NULL, &args_factory,
+                           &error),
+                       error.message);
+  memset(&capture, 0, sizeof(capture));
+  capture.retain_function = 1;
+  passed = passed &&
+           expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &k_type_args_i32_function,
+                           capture_args_function_callback, &completion,
+                           &capture, &error),
+                       error.message);
+  args_factory(completion);
+  passed = test_context_drain(&context) && passed;
+  returned_args_function = (args_i32_func)capture.native_function_value;
+  passed = passed &&
+           expect_true(capture.count == 1 && !capture.has_error &&
+                           returned_args_function != NULL,
+                       "pointer-list function return adapter missing");
+  passed = passed &&
+           expect_true(tra_ffic_function_release(completion, &error),
+                       error.message);
+  completion = NULL;
+
+  if (returned_args_function != NULL) {
+    memset(&capture, 0, sizeof(capture));
+    passed = passed &&
+             expect_true(tra_ffic_side_create_completion_function(
+                             &context.side_a, &k_type_i32,
+                             capture_i32_callback, &completion, &capture,
+                             &error),
+                         error.message);
+    returned_args_function(completion, one_arg);
+    passed = test_context_drain(&context) && passed;
+    passed = passed &&
+             expect_true(capture.count == 1 && !capture.has_error &&
+                             capture.int32_value == 42,
+                         "returned pointer-list function call failed");
+    passed = passed &&
+             expect_true(tra_ffic_function_release(completion, &error),
+                         error.message);
+    completion = NULL;
+  }
+
+  if (completion != NULL) {
+    passed = expect_true(tra_ffic_function_release(completion, &error),
+                         error.message) &&
+             passed;
+  }
+  if (returned_args_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(returned_args_function,
+                                                   &error),
+                         error.message) &&
+             passed;
+  }
+  if (args_factory != NULL) {
+    passed = expect_true(tra_ffic_function_release(args_factory, &error),
+                         error.message) &&
+             passed;
+  }
+  if (accept_args_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(accept_args_function,
+                                                   &error),
+                         error.message) &&
+             passed;
+  }
+  if (add_one != NULL) {
+    passed = expect_true(tra_ffic_function_release(add_one, &error),
+                         error.message) &&
+             passed;
+  }
+  if (retval_args_to_stack != NULL) {
+    passed = expect_true(tra_ffic_function_release(retval_args_to_stack,
+                                                   &error),
+                         error.message) &&
+             passed;
+  }
+  if (retval_stack_to_args != NULL) {
+    passed = expect_true(tra_ffic_function_release(retval_stack_to_args,
+                                                   &error),
+                         error.message) &&
+             passed;
+  }
+  if (args_to_stack != NULL) {
+    passed = expect_true(tra_ffic_function_release(args_to_stack, &error),
+                         error.message) &&
+             passed;
+  }
+  if (stack_to_args_closure != NULL) {
+    passed = expect_true(tra_ffic_function_release(stack_to_args_closure,
+                                                   &error),
+                         error.message) &&
+             passed;
+  }
+  if (stack_to_args != NULL) {
+    passed = expect_true(tra_ffic_function_release(stack_to_args, &error),
+                         error.message) &&
+             passed;
+  }
+  passed = test_context_drain(&context) && passed;
+  passed = test_context_destroy(&context) && passed;
+  return passed;
+}
+
 static int run_function_marshalling_test(test_drain_mode drain_mode) {
   test_context context;
   tra_ffic_error error;
@@ -4514,6 +4902,7 @@ static int run_regression_test(test_drain_mode drain_mode) {
   passed = passed && run_buffer_view_test(drain_mode);
   passed = passed && run_completion_behavior_test(drain_mode);
   passed = passed && run_async_completion_test(drain_mode);
+  passed = passed && run_pointer_list_argument_passing_test(drain_mode);
   passed = passed && run_function_marshalling_test(drain_mode);
   passed = passed && run_function_identity_test(drain_mode);
   passed = passed && run_three_level_function_signature_test(drain_mode);
