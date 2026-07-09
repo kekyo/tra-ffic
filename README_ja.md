@@ -71,8 +71,8 @@ int main(void) {
   // add関数のシグネチャを定義 `int32 (int32,int32)`
   tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2u, arg_types, &return_type};
+  tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2u, arg_types, &return_type);
 
   // サイドBにadd関数を生成
   add_func function;
@@ -254,6 +254,9 @@ tra-fficで使用できる型は、関数ポインタを除くと、`void`、`bo
 - 完了値として返された `buffer_view` は、指し示すバッファ本体をコピーせず、ビュー構造体だけをコピーします。
 - `TRA_FFIC_SIGNATURE_ABI_COMPLETION` は関数を `void(tra_ffic_completion, ...typed_args)` として公開します。
 - `TRA_FFIC_SIGNATURE_ABI_RETVAL` は関数を `return_type(...typed_args)` として公開します。同期実行専用で、v1では戻り値の `string`、`buffer_view`、`function` は借用値として扱います。
+- `tra_ffic_signature_stack()` は論理引数を個別の型付き引数として公開します。
+- `tra_ffic_signature_pointer_list()` は論理引数を `void *const *args` として公開します。`args[i]` は i 番目の論理引数の格納領域を指します。
+- `tra_ffic_side_create_pure_pointer_list_function()` と `tra_ffic_side_create_pointer_list_closure()` を使うと、公開シグネチャが stack 形式の場合でも実装 callback は同じ pointer-list 形式で引数を受け取れます。
 
 - 完了関数のコールバックも、シグネチャの戻り値型に対応するCの値と `const tra_ffic_error *` を受け取ります。
 
@@ -269,8 +272,8 @@ tra_ffic_type arg_types[] = {
     tra_ffic_type_string(),
 };
 tra_ffic_type return_type = tra_ffic_type_string();
-tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 5u, arg_types, &return_type};
+tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 5u, arg_types, &return_type);
 ```
 
 - 関数シグネチャには関数名 (ここでは `foobar`) が含まれないことに注意して下さい。
@@ -337,8 +340,8 @@ static int32_t add(int32_t a, int32_t b) {
 
 tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
 tra_ffic_type return_type = tra_ffic_type_int32();
-tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2u, arg_types, &return_type};
+tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2u, arg_types, &return_type);
 ```
 
 ### 関数ポインタ (クロージャ)
@@ -442,8 +445,8 @@ int main(void) {
   // add_offset関数のシグネチャを定義 `int32 (int32)`
   tra_ffic_type arg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
+  tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type);
 
   // サイドBにステートを含んだadd_offsetクロージャ関数を生成
   add_state state = {3};
@@ -557,12 +560,12 @@ int main(void) {
   // register_callback関数のシグネチャを定義 `int32 (void (*)(int32))`
   tra_ffic_type farg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type freturn_type = tra_ffic_type_void();
-  tra_ffic_signature fsignature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, farg_types, &freturn_type};
+  tra_ffic_signature fsignature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, farg_types, &freturn_type);
   tra_ffic_type arg_types[] = { tra_ffic_type_function(&fsignature) };
   tra_ffic_type return_type = tra_ffic_type_void();
-  tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
+  tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type);
 
   // サイドBにregister_callback関数を生成
   register_callback_func function;

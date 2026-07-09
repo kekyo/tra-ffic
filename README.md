@@ -74,8 +74,8 @@ int main(void) {
   // Define the add function signature: `int32 (int32,int32)`.
   tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2u, arg_types, &return_type};
+  tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2u, arg_types, &return_type);
 
   // Create the add function on side B.
   add_func function;
@@ -257,6 +257,9 @@ The types available in tra-ffic, excluding function pointers, are `void`, `bool`
 - Completion-function callbacks also receive a C value corresponding to the signature's return type and a `const tra_ffic_error *`.
 - `TRA_FFIC_SIGNATURE_ABI_COMPLETION` exposes functions as `void(tra_ffic_completion, ...typed_args)`.
 - `TRA_FFIC_SIGNATURE_ABI_RETVAL` exposes functions as `return_type(...typed_args)`. It is synchronous only; returned `string`, `buffer_view`, and `function` values are borrowed in v1.
+- `tra_ffic_signature_stack()` exposes logical arguments as individual typed parameters.
+- `tra_ffic_signature_pointer_list()` exposes logical arguments as `void *const *args`; `args[i]` points to the storage for the i-th logical argument.
+- `tra_ffic_side_create_pure_pointer_list_function()` and `tra_ffic_side_create_pointer_list_closure()` let the implementation callback receive that same pointer list even when the public signature is stack-based.
 
 The following example defines a function signature. Assume that an imaginary `foobar` function exists and that this is its signature:
 
@@ -271,8 +274,8 @@ tra_ffic_type arg_types[] = {
     tra_ffic_type_string(),
 };
 tra_ffic_type return_type = tra_ffic_type_string();
-tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 5u, arg_types, &return_type};
+tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 5u, arg_types, &return_type);
 ```
 
 - Note that the function signature does not include the function name (`foobar` here).
@@ -339,8 +342,8 @@ static int32_t add(int32_t a, int32_t b) {
 
 tra_ffic_type arg_types[] = { tra_ffic_type_int32(), tra_ffic_type_int32() };
 tra_ffic_type return_type = tra_ffic_type_int32();
-tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2u, arg_types, &return_type};
+tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_RETVAL, 2u, arg_types, &return_type);
 ```
 
 ### Function Pointers (Closures)
@@ -444,8 +447,8 @@ int main(void) {
   // Define the add_offset function signature: `int32 (int32)`.
   tra_ffic_type arg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type return_type = tra_ffic_type_int32();
-  tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
+  tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type);
 
   // Create an add_offset closure function with state on side B.
   add_state state = {3};
@@ -557,12 +560,12 @@ int main(void) {
   // Define the register_callback function signature: `int32 (void (*)(int32))`.
   tra_ffic_type farg_types[] = { tra_ffic_type_int32() };
   tra_ffic_type freturn_type = tra_ffic_type_void();
-  tra_ffic_signature fsignature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, farg_types, &freturn_type};
+  tra_ffic_signature fsignature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, farg_types, &freturn_type);
   tra_ffic_type arg_types[] = { tra_ffic_type_function(&fsignature) };
   tra_ffic_type return_type = tra_ffic_type_void();
-  tra_ffic_signature signature = {
-    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type};
+  tra_ffic_signature signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &return_type);
 
   // Create the register_callback function on side B.
   register_callback_func function;
