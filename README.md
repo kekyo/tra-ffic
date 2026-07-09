@@ -634,7 +634,7 @@ The Win32 tests do not use Valgrind or ASAN.
 
 This project began when I considered porting the core functionality of [DupeNukem](https://github.com/kekyo/DupeNukem/) to native code.
 
-While working on a similar implementation in the "gluon" project (not yet released), I decided to spin it off into a completely independent library, believing it would be worthwhile to establish it as such (in reality, it was quite complex, so this decision was made with independence and testability in mind).
+While working on a similar implementation in ["muon" project](https://github.com/kekyo/muon-ui/), I decided to spin it off into a completely independent library, believing it would be worthwhile to establish it as such (in reality, it was quite complex, so this decision was made with independence and testability in mind).
 
 ## License
 
