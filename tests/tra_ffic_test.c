@@ -56,6 +56,23 @@ typedef const char *(*retval_string_factory_func)(void);
 typedef tra_ffic_buffer_view (*retval_buffer_view_factory_func)(void);
 typedef retval_i32_func (*retval_function_factory_func)(void);
 typedef int32_t (*retval_function_arg_func)(retval_i32_func callback);
+
+typedef struct basic_struct_inner {
+  uint8_t flag;
+  double ratio;
+} basic_struct_inner;
+
+typedef struct basic_struct_value {
+  int32_t number;
+  basic_struct_inner nested;
+  uint64_t total;
+} basic_struct_value;
+
+typedef void (*basic_struct_func)(tra_ffic_completion completion,
+                                  basic_struct_value value);
+typedef basic_struct_value (*retval_basic_struct_func)(
+    basic_struct_value value);
+
 typedef enum test_drain_mode {
   TEST_DRAIN_INLINE,
   TEST_DRAIN_THREAD,
@@ -94,6 +111,13 @@ typedef struct typed_capture {
   int has_error;
   char error_message[TRA_FFIC_ERROR_MESSAGE_CAPACITY];
 } typed_capture;
+
+typedef struct basic_struct_capture {
+  int count;
+  int has_error;
+  basic_struct_value value;
+  char error_message[TRA_FFIC_ERROR_MESSAGE_CAPACITY];
+} basic_struct_capture;
 
 typedef struct finalize_counter {
   int count;
@@ -193,56 +217,73 @@ typedef struct release_during_call_state {
 
 static i32_func g_seen_function_argument = NULL;
 
-static const tra_ffic_type k_type_void = {TRA_FFIC_TYPE_VOID, NULL};
-static const tra_ffic_type k_type_bool = {TRA_FFIC_TYPE_BOOL, NULL};
-static const tra_ffic_type k_type_i8 = {TRA_FFIC_TYPE_INT8, NULL};
-static const tra_ffic_type k_type_u8 = {TRA_FFIC_TYPE_UINT8, NULL};
-static const tra_ffic_type k_type_i16 = {TRA_FFIC_TYPE_INT16, NULL};
-static const tra_ffic_type k_type_u16 = {TRA_FFIC_TYPE_UINT16, NULL};
-static const tra_ffic_type k_type_i32 = {TRA_FFIC_TYPE_INT32, NULL};
-static const tra_ffic_type k_type_u32 = {TRA_FFIC_TYPE_UINT32, NULL};
-static const tra_ffic_type k_type_i64 = {TRA_FFIC_TYPE_INT64, NULL};
-static const tra_ffic_type k_type_u64 = {TRA_FFIC_TYPE_UINT64, NULL};
-static const tra_ffic_type k_type_f32 = {TRA_FFIC_TYPE_FLOAT, NULL};
-static const tra_ffic_type k_type_f64 = {TRA_FFIC_TYPE_DOUBLE, NULL};
-static const tra_ffic_type k_type_pointer = {TRA_FFIC_TYPE_POINTER, NULL};
-static const tra_ffic_type k_type_string = {TRA_FFIC_TYPE_STRING, NULL};
+#define TEST_TYPE(kind, signature) \
+  { (kind), (signature), 0u, NULL }
+
+static const tra_ffic_type k_type_void =
+    TEST_TYPE(TRA_FFIC_TYPE_VOID, NULL);
+static const tra_ffic_type k_type_bool =
+    TEST_TYPE(TRA_FFIC_TYPE_BOOL, NULL);
+static const tra_ffic_type k_type_i8 =
+    TEST_TYPE(TRA_FFIC_TYPE_INT8, NULL);
+static const tra_ffic_type k_type_u8 =
+    TEST_TYPE(TRA_FFIC_TYPE_UINT8, NULL);
+static const tra_ffic_type k_type_i16 =
+    TEST_TYPE(TRA_FFIC_TYPE_INT16, NULL);
+static const tra_ffic_type k_type_u16 =
+    TEST_TYPE(TRA_FFIC_TYPE_UINT16, NULL);
+static const tra_ffic_type k_type_i32 =
+    TEST_TYPE(TRA_FFIC_TYPE_INT32, NULL);
+static const tra_ffic_type k_type_u32 =
+    TEST_TYPE(TRA_FFIC_TYPE_UINT32, NULL);
+static const tra_ffic_type k_type_i64 =
+    TEST_TYPE(TRA_FFIC_TYPE_INT64, NULL);
+static const tra_ffic_type k_type_u64 =
+    TEST_TYPE(TRA_FFIC_TYPE_UINT64, NULL);
+static const tra_ffic_type k_type_f32 =
+    TEST_TYPE(TRA_FFIC_TYPE_FLOAT, NULL);
+static const tra_ffic_type k_type_f64 =
+    TEST_TYPE(TRA_FFIC_TYPE_DOUBLE, NULL);
+static const tra_ffic_type k_type_pointer =
+    TEST_TYPE(TRA_FFIC_TYPE_POINTER, NULL);
+static const tra_ffic_type k_type_string =
+    TEST_TYPE(TRA_FFIC_TYPE_STRING, NULL);
 static const tra_ffic_type k_type_buffer_view = {
-    TRA_FFIC_TYPE_BUFFER_VIEW, NULL};
+    TRA_FFIC_TYPE_BUFFER_VIEW, NULL, 0u, NULL};
 
 static const tra_ffic_type k_sig_one_bool_args[] = {
-    {TRA_FFIC_TYPE_BOOL, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_BOOL, NULL)};
 static const tra_ffic_signature k_sig_echo_bool = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_bool_args, &k_type_bool, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i8_args[] = {
-    {TRA_FFIC_TYPE_INT8, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_INT8, NULL)};
 static const tra_ffic_signature k_sig_echo_i8 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i8_args, &k_type_i8, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_u8_args[] = {
-    {TRA_FFIC_TYPE_UINT8, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_UINT8, NULL)};
 static const tra_ffic_signature k_sig_echo_u8 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u8_args, &k_type_u8, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i16_args[] = {
-    {TRA_FFIC_TYPE_INT16, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_INT16, NULL)};
 static const tra_ffic_signature k_sig_echo_i16 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i16_args, &k_type_i16, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_u16_args[] = {
-    {TRA_FFIC_TYPE_UINT16, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_UINT16, NULL)};
 static const tra_ffic_signature k_sig_echo_u16 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u16_args, &k_type_u16, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i32_args[] = {
-    {TRA_FFIC_TYPE_INT32, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_INT32, NULL)};
 static const tra_ffic_signature k_sig_echo_i32 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i32_args, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_two_i32_args[] = {
-    {TRA_FFIC_TYPE_INT32, NULL},
-    {TRA_FFIC_TYPE_INT32, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_INT32, NULL),
+    TEST_TYPE(TRA_FFIC_TYPE_INT32, NULL)};
 static const tra_ffic_signature k_sig_add_i32 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 2, k_sig_two_i32_args, &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_sig_args_add_i32 = {
@@ -253,44 +294,44 @@ static const tra_ffic_signature k_sig_args_add_i32 = {
     TRA_FFIC_ARGUMENT_PASSING_POINTER_LIST};
 
 static const tra_ffic_type k_sig_one_u32_args[] = {
-    {TRA_FFIC_TYPE_UINT32, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_UINT32, NULL)};
 static const tra_ffic_signature k_sig_echo_u32 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u32_args, &k_type_u32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_i64_args[] = {
-    {TRA_FFIC_TYPE_INT64, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_INT64, NULL)};
 static const tra_ffic_signature k_sig_echo_i64 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_i64_args, &k_type_i64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_u64_args[] = {
-    {TRA_FFIC_TYPE_UINT64, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_UINT64, NULL)};
 static const tra_ffic_signature k_sig_echo_u64 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_u64_args, &k_type_u64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_f32_args[] = {
-    {TRA_FFIC_TYPE_FLOAT, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_FLOAT, NULL)};
 static const tra_ffic_signature k_sig_echo_f32 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f32_args, &k_type_f32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_f64_args[] = {
-    {TRA_FFIC_TYPE_DOUBLE, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_DOUBLE, NULL)};
 static const tra_ffic_signature k_sig_echo_f64 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_f64_args, &k_type_f64, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_pointer_args[] = {
-    {TRA_FFIC_TYPE_POINTER, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_POINTER, NULL)};
 static const tra_ffic_signature k_sig_echo_pointer = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_pointer_args,
     &k_type_pointer, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_string_args[] = {
-    {TRA_FFIC_TYPE_STRING, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_STRING, NULL)};
 static const tra_ffic_signature k_sig_echo_string = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_string_args,
     &k_type_string, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_sig_one_buffer_view_args[] = {
-    {TRA_FFIC_TYPE_BUFFER_VIEW, NULL}};
+    TEST_TYPE(TRA_FFIC_TYPE_BUFFER_VIEW, NULL)};
 static const tra_ffic_signature k_sig_echo_buffer_view = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_one_buffer_view_args,
     &k_type_buffer_view, TRA_FFIC_ARGUMENT_PASSING_STACK};
@@ -309,7 +350,7 @@ static const tra_ffic_signature k_sig_return_buffer_view = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 0, NULL, &k_type_buffer_view, TRA_FFIC_ARGUMENT_PASSING_STACK};
 
 static const tra_ffic_type k_type_i32_function = {
-    TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32};
+    TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32, 0u, NULL};
 static const tra_ffic_signature k_sig_args_echo_i32 = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION,
     1,
@@ -317,14 +358,14 @@ static const tra_ffic_signature k_sig_args_echo_i32 = {
     &k_type_i32,
     TRA_FFIC_ARGUMENT_PASSING_POINTER_LIST};
 static const tra_ffic_type k_type_args_i32_function = {
-    TRA_FFIC_TYPE_FUNCTION, &k_sig_args_echo_i32};
+    TRA_FFIC_TYPE_FUNCTION, &k_sig_args_echo_i32, 0u, NULL};
 static const tra_ffic_type k_sig_function_arg_args[] = {
-    {TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32}};
+    TEST_TYPE(TRA_FFIC_TYPE_FUNCTION, &k_sig_echo_i32)};
 static const tra_ffic_signature k_sig_function_arg = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_function_arg_args,
     &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_type k_sig_args_function_arg_args[] = {
-    {TRA_FFIC_TYPE_FUNCTION, &k_sig_args_echo_i32}};
+    TEST_TYPE(TRA_FFIC_TYPE_FUNCTION, &k_sig_args_echo_i32)};
 static const tra_ffic_signature k_sig_args_function_arg = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION,
     1,
@@ -332,7 +373,7 @@ static const tra_ffic_signature k_sig_args_function_arg = {
     &k_type_i32,
     TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_type k_sig_function_arg_arg_args[] = {
-    {TRA_FFIC_TYPE_FUNCTION, &k_sig_function_arg}};
+    TEST_TYPE(TRA_FFIC_TYPE_FUNCTION, &k_sig_function_arg)};
 static const tra_ffic_signature k_sig_function_arg_arg = {
     TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1, k_sig_function_arg_arg_args,
     &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
@@ -364,14 +405,16 @@ static const tra_ffic_signature k_retval_sig_return_string = {
 static const tra_ffic_signature k_retval_sig_return_buffer_view = {
     TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_buffer_view, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_type k_type_retval_i32_function = {
-    TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32};
+    TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32, 0u, NULL};
 static const tra_ffic_type k_retval_sig_function_arg_args[] = {
-    {TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32}};
+    TEST_TYPE(TRA_FFIC_TYPE_FUNCTION, &k_retval_sig_echo_i32)};
 static const tra_ffic_signature k_retval_sig_function_arg = {
     TRA_FFIC_SIGNATURE_ABI_RETVAL, 1, k_retval_sig_function_arg_args,
     &k_type_i32, TRA_FFIC_ARGUMENT_PASSING_STACK};
 static const tra_ffic_signature k_retval_sig_return_function = {
     TRA_FFIC_SIGNATURE_ABI_RETVAL, 0, NULL, &k_type_retval_i32_function, TRA_FFIC_ARGUMENT_PASSING_STACK};
+
+#undef TEST_TYPE
 
 static int expect_true(int condition, const char *message) {
   if (!condition) {
@@ -676,6 +719,9 @@ static void capture_result_callback(void *user_data,
       capture->function_value = (i32_func)result->value.as.function_value;
       capture->native_function_value = result->value.as.function_value;
       break;
+    case TRA_FFIC_TYPE_STRUCT:
+      capture->pointer_value = (void *)result->value.as.struct_value;
+      break;
   }
 }
 
@@ -972,6 +1018,47 @@ static void echo_buffer_view_function(tra_ffic_completion completion,
     ((uint8_t *)value.data)[1] = 0x42u;
   }
   completion(&value, NULL);
+}
+
+static basic_struct_value transform_basic_struct(
+    basic_struct_value value,
+    int32_t delta) {
+  value.number += delta;
+  value.nested.flag = (uint8_t)(value.nested.flag + 1u);
+  value.nested.ratio *= 2.0;
+  value.total += (uint64_t)delta;
+  return value;
+}
+
+static void basic_struct_completion_closure(
+    tra_ffic_completion completion,
+    void *closure_state,
+    basic_struct_value value) {
+  const int32_t delta = *(const int32_t *)closure_state;
+  basic_struct_value result = transform_basic_struct(value, delta);
+  completion(&result, NULL);
+  memset(&result, 0, sizeof(result));
+}
+
+static basic_struct_value basic_struct_retval_closure(
+    void *closure_state,
+    basic_struct_value value) {
+  const int32_t delta = *(const int32_t *)closure_state;
+  return transform_basic_struct(value, delta);
+}
+
+static void capture_basic_struct_callback(
+    void *user_data,
+    basic_struct_value result,
+    const tra_ffic_error *error) {
+  basic_struct_capture *capture = (basic_struct_capture *)user_data;
+  capture->count += 1;
+  capture->value = result;
+  capture->has_error = error != NULL;
+  if (error != NULL) {
+    (void)snprintf(capture->error_message, sizeof(capture->error_message),
+                   "%s", error->message);
+  }
 }
 
 static void echo_void_function(tra_ffic_completion completion) {
@@ -1435,6 +1522,8 @@ static int three_level_value_equals(const tra_ffic_value *left,
       return strcmp(left->as.string_value, right->as.string_value) == 0;
     case TRA_FFIC_TYPE_FUNCTION:
       return left->as.function_value == right->as.function_value;
+    case TRA_FFIC_TYPE_STRUCT:
+      return left->as.struct_value == right->as.struct_value;
   }
   return 0;
 }
@@ -1493,6 +1582,9 @@ static void three_level_complete_value(tra_ffic_completion completion,
       break;
     case TRA_FFIC_TYPE_FUNCTION:
       completion(&value->as.function_value, NULL);
+      break;
+    case TRA_FFIC_TYPE_STRUCT:
+      completion(value->as.struct_value, NULL);
       break;
   }
 }
@@ -2177,6 +2269,114 @@ static int run_primitive_test(test_drain_mode drain_mode) {
 
 #undef RUN_PRIMITIVE_CASE
 
+  passed = test_context_destroy(&context) && passed;
+  return passed;
+}
+
+static int run_basic_struct_test(test_drain_mode drain_mode) {
+  test_context context;
+  tra_ffic_error error;
+  tra_ffic_type inner_field_types[2];
+  tra_ffic_type struct_field_types[3];
+  tra_ffic_type arg_types[1];
+  tra_ffic_type inner_type;
+  tra_ffic_type struct_type;
+  tra_ffic_signature completion_signature;
+  tra_ffic_signature retval_signature;
+  basic_struct_func completion_function = NULL;
+  retval_basic_struct_func retval_function = NULL;
+  tra_ffic_completion completion = NULL;
+  basic_struct_capture capture;
+  basic_struct_value input;
+  basic_struct_value result;
+  int32_t delta = 5;
+  int passed = 1;
+
+  if (!test_context_init(&context, drain_mode)) {
+    return 0;
+  }
+
+  inner_field_types[0] = tra_ffic_type_uint8();
+  inner_field_types[1] = tra_ffic_type_double();
+  inner_type = tra_ffic_type_struct(2u, inner_field_types);
+  struct_field_types[0] = tra_ffic_type_int32();
+  struct_field_types[1] = inner_type;
+  struct_field_types[2] = tra_ffic_type_uint64();
+  struct_type = tra_ffic_type_struct(3u, struct_field_types);
+  arg_types[0] = struct_type;
+  completion_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, arg_types, &struct_type);
+  retval_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_RETVAL, 1u, arg_types, &struct_type);
+
+  memset(&capture, 0, sizeof(capture));
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &completion_signature,
+                           basic_struct_completion_closure, &delta, NULL,
+                           &completion_function, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &struct_type,
+                           capture_basic_struct_callback, &completion,
+                           &capture, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &retval_signature,
+                           basic_struct_retval_closure, &delta, NULL,
+                           &retval_function, &error),
+                       error.message) &&
+           passed;
+
+  memset(inner_field_types, 0, sizeof(inner_field_types));
+  memset(struct_field_types, 0, sizeof(struct_field_types));
+  memset(arg_types, 0, sizeof(arg_types));
+
+  memset(&input, 0, sizeof(input));
+  input.number = 37;
+  input.nested.flag = 2u;
+  input.nested.ratio = 1.25;
+  input.total = 100u;
+  if (completion_function != NULL && completion != NULL) {
+    completion_function(completion, input);
+    passed = test_context_drain(&context) && passed;
+    passed = expect_true(
+                 capture.count == 1 && !capture.has_error &&
+                     capture.value.number == 42 &&
+                     capture.value.nested.flag == 3u &&
+                     capture.value.nested.ratio == 2.5 &&
+                     capture.value.total == 105u,
+                 "completion struct result mismatch") &&
+             passed;
+  }
+  if (retval_function != NULL) {
+    result = retval_function(input);
+    passed = expect_true(result.number == 42 &&
+                             result.nested.flag == 3u &&
+                             result.nested.ratio == 2.5 &&
+                             result.total == 105u,
+                         "retval struct result mismatch") &&
+             passed;
+  }
+
+  if (completion != NULL) {
+    passed = expect_true(tra_ffic_function_release(completion, &error),
+                         error.message) &&
+             passed;
+  }
+  if (completion_function != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(completion_function, &error),
+                 error.message) &&
+             passed;
+  }
+  if (retval_function != NULL) {
+    passed = expect_true(tra_ffic_function_release(retval_function, &error),
+                         error.message) &&
+             passed;
+  }
+  passed = test_context_drain(&context) && passed;
   passed = test_context_destroy(&context) && passed;
   return passed;
 }
@@ -4895,6 +5095,7 @@ static int run_regression_test(test_drain_mode drain_mode) {
   passed = passed && run_task_queue_notification_test(drain_mode);
   passed = passed && run_readme_minimum_test(drain_mode);
   passed = passed && run_primitive_test(drain_mode);
+  passed = passed && run_basic_struct_test(drain_mode);
   passed = passed && run_closure_scalar_test(drain_mode);
   passed = passed && run_structured_scalar_call_test(drain_mode);
   passed = passed && run_success_scalar_call_test(drain_mode);

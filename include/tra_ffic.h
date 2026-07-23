@@ -61,7 +61,7 @@ typedef char tra_ffic_bool_must_be_one_byte[(sizeof(bool) == 1) ? 1 : -1];
 /** Maximum number of bytes stored in a tra_ffic_error message. */
 #define TRA_FFIC_ERROR_MESSAGE_CAPACITY 256u
 
-/** Maximum supported recursive function type nesting depth. */
+/** Maximum supported recursive type nesting depth. */
 #define TRA_FFIC_MAX_TYPE_DEPTH 16u
 
 /** Maximum supported ABI argument count, excluding the completion callback. */
@@ -98,6 +98,7 @@ typedef enum tra_ffic_type_kind {
   TRA_FFIC_TYPE_POINTER = 13,
   TRA_FFIC_TYPE_FUNCTION = 14,
   TRA_FFIC_TYPE_BUFFER_VIEW = 15,
+  TRA_FFIC_TYPE_STRUCT = 16,
 } tra_ffic_type_kind;
 
 /** Native function ABI used by a tra_ffic_signature. */
@@ -118,10 +119,14 @@ typedef enum tra_ffic_argument_passing {
 
 /** Recursive type descriptor used by function signatures. */
 struct tra_ffic_type {
-  /** Leaf kind. Function types use function_signature. */
+  /** Type discriminator. */
   tra_ffic_type_kind kind;
   /** Nested signature. Valid only when kind is TRA_FFIC_TYPE_FUNCTION. */
   const tra_ffic_signature *function_signature;
+  /** Number of ordered fields. Valid only for TRA_FFIC_TYPE_STRUCT. */
+  uint32_t struct_field_count;
+  /** Ordered field types. Valid only for TRA_FFIC_TYPE_STRUCT. */
+  const tra_ffic_type *struct_field_types;
 };
 
 /** Function signature with an explicit native ABI. */
@@ -194,6 +199,8 @@ struct tra_ffic_value {
     const char *string_value;
     /** Borrowed registered function pointer. May be null as a value. */
     tra_ffic_native_function function_value;
+    /** Borrowed pointer to a native structure value. */
+    const void *struct_value;
   } as;
 };
 
@@ -340,6 +347,21 @@ typedef struct tra_ffic_registry_entry tra_ffic_registry_entry;
 typedef struct tra_ffic_function_adapter_state
     tra_ffic_function_adapter_state;
 
+typedef struct tra_ffic_abi_type {
+  ffi_type aggregate;
+  ffi_type *ffi;
+  struct tra_ffic_abi_type *field_types;
+  ffi_type **elements;
+  size_t *field_offsets;
+  uint32_t field_count;
+} tra_ffic_abi_type;
+
+typedef struct tra_ffic_abi_signature {
+  tra_ffic_abi_type *arg_types;
+  tra_ffic_abi_type return_type;
+  uint32_t arg_count;
+} tra_ffic_abi_signature;
+
 /** One side of a same-process A/B function marshaling pair. */
 struct tra_ffic_side {
   /** Internal registry mutex. */
@@ -379,7 +401,9 @@ struct tra_ffic_registry_entry {
   tra_ffic_registry_entry *next;
   tra_ffic_registry_entry *global_next;
   tra_ffic_signature *signature;
+  tra_ffic_abi_signature abi_signature;
   tra_ffic_type completion_return_type;
+  tra_ffic_abi_type completion_return_abi_type;
   bool has_completion_return_type;
   ffi_cif cif;
   ffi_type **ffi_arg_types;
@@ -584,132 +608,107 @@ static inline char *tra_ffic_string_duplicate(const char *value) {
   return copy;
 }
 
+static inline tra_ffic_type tra_ffic_type_leaf(tra_ffic_type_kind kind) {
+  tra_ffic_type type;
+  memset(&type, 0, sizeof(type));
+  type.kind = kind;
+  return type;
+}
+
 /** Returns a void type descriptor for function results. */
 static inline tra_ffic_type tra_ffic_type_void(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_VOID;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_VOID);
 }
 
 /** Returns a bool type descriptor. */
 static inline tra_ffic_type tra_ffic_type_bool(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_BOOL;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_BOOL);
 }
 
 /** Returns an int8_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_int8(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_INT8;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_INT8);
 }
 
 /** Returns a uint8_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_uint8(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_UINT8;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_UINT8);
 }
 
 /** Returns an int16_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_int16(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_INT16;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_INT16);
 }
 
 /** Returns a uint16_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_uint16(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_UINT16;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_UINT16);
 }
 
 /** Returns an int32_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_int32(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_INT32;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_INT32);
 }
 
 /** Returns a uint32_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_uint32(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_UINT32;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_UINT32);
 }
 
 /** Returns an int64_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_int64(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_INT64;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_INT64);
 }
 
 /** Returns a uint64_t type descriptor. */
 static inline tra_ffic_type tra_ffic_type_uint64(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_UINT64;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_UINT64);
 }
 
 /** Returns a float type descriptor. */
 static inline tra_ffic_type tra_ffic_type_float(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_FLOAT;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_FLOAT);
 }
 
 /** Returns a double type descriptor. */
 static inline tra_ffic_type tra_ffic_type_double(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_DOUBLE;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_DOUBLE);
 }
 
 /** Returns a const char* string type descriptor. */
 static inline tra_ffic_type tra_ffic_type_string(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_STRING;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_STRING);
 }
 
 /** Returns a borrowed raw pointer type descriptor. */
 static inline tra_ffic_type tra_ffic_type_pointer(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_POINTER;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_POINTER);
 }
 
 /** Returns a borrowed mutable byte buffer view type descriptor. */
 static inline tra_ffic_type tra_ffic_type_buffer_view(void) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_BUFFER_VIEW;
-  type.function_signature = NULL;
-  return type;
+  return tra_ffic_type_leaf(TRA_FFIC_TYPE_BUFFER_VIEW);
 }
 
 /** Returns a closed function type descriptor for the given signature. */
 static inline tra_ffic_type tra_ffic_type_function(
     const tra_ffic_signature *signature) {
-  tra_ffic_type type;
-  type.kind = TRA_FFIC_TYPE_FUNCTION;
+  tra_ffic_type type = tra_ffic_type_leaf(TRA_FFIC_TYPE_FUNCTION);
   type.function_signature = signature;
+  return type;
+}
+
+/**
+ * Returns a native structure type descriptor.
+ *
+ * Fields must be listed in the same order as their native C declaration.
+ */
+static inline tra_ffic_type tra_ffic_type_struct(
+    uint32_t field_count,
+    const tra_ffic_type *field_types) {
+  tra_ffic_type type = tra_ffic_type_leaf(TRA_FFIC_TYPE_STRUCT);
+  type.struct_field_count = field_count;
+  type.struct_field_types = field_types;
   return type;
 }
 
@@ -872,6 +871,14 @@ static inline tra_ffic_value tra_ffic_value_function(
   return value;
 }
 
+/** Returns a borrowed native structure runtime value. */
+static inline tra_ffic_value tra_ffic_value_struct(const void *source) {
+  tra_ffic_value value;
+  value.kind = TRA_FFIC_TYPE_STRUCT;
+  value.as.struct_value = source;
+  return value;
+}
+
 static inline tra_ffic_native_function tra_ffic_native_from_code(
     void *code) {
   tra_ffic_code_to_native converter;
@@ -960,7 +967,8 @@ static inline int tra_ffic_is_valid_kind(tra_ffic_type_kind kind) {
          kind == TRA_FFIC_TYPE_STRING ||
          kind == TRA_FFIC_TYPE_POINTER ||
          kind == TRA_FFIC_TYPE_BUFFER_VIEW ||
-         kind == TRA_FFIC_TYPE_FUNCTION;
+         kind == TRA_FFIC_TYPE_FUNCTION ||
+         kind == TRA_FFIC_TYPE_STRUCT;
 }
 
 static inline int tra_ffic_is_valid_signature_abi(
@@ -1028,7 +1036,7 @@ static inline int tra_ffic_type_validate(const tra_ffic_type *type,
     return 0;
   }
   if (depth > TRA_FFIC_MAX_TYPE_DEPTH) {
-    tra_ffic_error_set(error, "Function type nesting is too deep");
+    tra_ffic_error_set(error, "Type nesting is too deep");
     return 0;
   }
   if (!tra_ffic_is_valid_kind(type->kind)) {
@@ -1040,11 +1048,40 @@ static inline int tra_ffic_type_validate(const tra_ffic_type *type,
     return 0;
   }
   if (type->kind == TRA_FFIC_TYPE_FUNCTION) {
+    if (type->struct_field_count != 0u ||
+        type->struct_field_types != NULL) {
+      tra_ffic_error_set(error, "Function type has structure fields");
+      return 0;
+    }
     return tra_ffic_signature_validate(type->function_signature, depth + 1u,
                                           error);
   }
-  if (type->function_signature != NULL) {
-    tra_ffic_error_set(error, "Primitive type has a function signature");
+  if (type->kind == TRA_FFIC_TYPE_STRUCT) {
+    uint32_t index = 0u;
+    if (type->function_signature != NULL) {
+      tra_ffic_error_set(error, "Structure type has a function signature");
+      return 0;
+    }
+    if (type->struct_field_count == 0u) {
+      tra_ffic_error_set(error, "Structure type has no fields");
+      return 0;
+    }
+    if (type->struct_field_types == NULL) {
+      tra_ffic_error_set(error, "Structure field type table is null");
+      return 0;
+    }
+    for (index = 0u; index < type->struct_field_count; ++index) {
+      if (!tra_ffic_type_validate(&type->struct_field_types[index], false,
+                                  depth + 1u, error)) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  if (type->function_signature != NULL ||
+      type->struct_field_count != 0u ||
+      type->struct_field_types != NULL) {
+    tra_ffic_error_set(error, "Primitive type has nested metadata");
     return 0;
   }
   return 1;
@@ -1086,6 +1123,19 @@ static inline int tra_ffic_type_equals(const tra_ffic_type *first,
   if (first->kind != second->kind) {
     return 0;
   }
+  if (first->kind == TRA_FFIC_TYPE_STRUCT) {
+    uint32_t index = 0u;
+    if (first->struct_field_count != second->struct_field_count) {
+      return 0;
+    }
+    for (index = 0u; index < first->struct_field_count; ++index) {
+      if (!tra_ffic_type_equals(&first->struct_field_types[index],
+                                &second->struct_field_types[index])) {
+        return 0;
+      }
+    }
+    return 1;
+  }
   if (first->kind != TRA_FFIC_TYPE_FUNCTION) {
     return 1;
   }
@@ -1126,6 +1176,20 @@ static inline int tra_ffic_type_logically_equals(
   if (first->kind != second->kind) {
     return 0;
   }
+  if (first->kind == TRA_FFIC_TYPE_STRUCT) {
+    uint32_t index = 0u;
+    if (first->struct_field_count != second->struct_field_count) {
+      return 0;
+    }
+    for (index = 0u; index < first->struct_field_count; ++index) {
+      if (!tra_ffic_type_logically_equals(
+              &first->struct_field_types[index],
+              &second->struct_field_types[index])) {
+        return 0;
+      }
+    }
+    return 1;
+  }
   if (first->kind != TRA_FFIC_TYPE_FUNCTION) {
     return 1;
   }
@@ -1161,9 +1225,19 @@ static inline void tra_ffic_type_destroy(tra_ffic_type *type) {
   if (type->kind == TRA_FFIC_TYPE_FUNCTION) {
     tra_ffic_signature_destroy(
         (tra_ffic_signature *)type->function_signature);
+  } else if (type->kind == TRA_FFIC_TYPE_STRUCT) {
+    tra_ffic_type *fields =
+        (tra_ffic_type *)type->struct_field_types;
+    uint32_t index = 0u;
+    for (index = 0u; index < type->struct_field_count; ++index) {
+      tra_ffic_type_destroy(&fields[index]);
+    }
+    free(fields);
   }
   type->kind = TRA_FFIC_TYPE_VOID;
   type->function_signature = NULL;
+  type->struct_field_count = 0u;
+  type->struct_field_types = NULL;
 }
 
 static inline int tra_ffic_type_clone(const tra_ffic_type *source,
@@ -1225,12 +1299,39 @@ static inline int tra_ffic_type_clone(const tra_ffic_type *source,
   }
   target->kind = source->kind;
   target->function_signature = NULL;
+  target->struct_field_count = 0u;
+  target->struct_field_types = NULL;
   if (source->kind == TRA_FFIC_TYPE_FUNCTION) {
     target->function_signature =
         tra_ffic_signature_clone(source->function_signature, depth + 1u,
                                     error);
     if (target->function_signature == NULL) {
       return 0;
+    }
+  } else if (source->kind == TRA_FFIC_TYPE_STRUCT) {
+    tra_ffic_type *fields = NULL;
+    uint32_t index = 0u;
+#if SIZE_MAX <= UINT32_MAX
+    if ((size_t)source->struct_field_count >
+        SIZE_MAX / sizeof(*fields)) {
+      tra_ffic_error_set(error, "Structure field table is too large");
+      return 0;
+    }
+#endif
+    fields = (tra_ffic_type *)calloc(source->struct_field_count,
+                                     sizeof(*fields));
+    if (fields == NULL) {
+      tra_ffic_error_set(error, "Out of memory cloning structure type");
+      return 0;
+    }
+    target->struct_field_count = source->struct_field_count;
+    target->struct_field_types = fields;
+    for (index = 0u; index < source->struct_field_count; ++index) {
+      if (!tra_ffic_type_clone(&source->struct_field_types[index],
+                               &fields[index], depth + 1u, error)) {
+        tra_ffic_type_destroy(target);
+        return 0;
+      }
     }
   }
   return 1;
@@ -1275,8 +1376,147 @@ static inline ffi_type *tra_ffic_get_ffi_type(
       return &ffi_type_pointer;
     case TRA_FFIC_TYPE_FUNCTION:
       return &ffi_type_pointer;
+    case TRA_FFIC_TYPE_STRUCT:
+      return NULL;
   }
   return NULL;
+}
+
+static inline void tra_ffic_abi_type_destroy(tra_ffic_abi_type *type) {
+  uint32_t index = 0u;
+  if (type == NULL) {
+    return;
+  }
+  for (index = 0u; index < type->field_count; ++index) {
+    tra_ffic_abi_type_destroy(&type->field_types[index]);
+  }
+  free(type->field_types);
+  free(type->elements);
+  free(type->field_offsets);
+  memset(type, 0, sizeof(*type));
+}
+
+static inline int tra_ffic_abi_type_init(
+    const tra_ffic_type *logical_type,
+    bool for_return,
+    tra_ffic_abi_type *target,
+    tra_ffic_error *error) {
+  uint32_t index = 0u;
+  ffi_status status = FFI_OK;
+  if (logical_type == NULL || target == NULL) {
+    tra_ffic_error_set(error, "ABI type input is null");
+    return 0;
+  }
+  memset(target, 0, sizeof(*target));
+  if (logical_type->kind != TRA_FFIC_TYPE_STRUCT) {
+    target->ffi = tra_ffic_get_ffi_type(logical_type, for_return);
+    if (target->ffi == NULL) {
+      tra_ffic_error_set(error, "Unsupported ABI type");
+      return 0;
+    }
+    return 1;
+  }
+#if SIZE_MAX <= UINT32_MAX
+  if ((size_t)logical_type->struct_field_count >
+          (SIZE_MAX / sizeof(*target->elements)) - 1u ||
+      (size_t)logical_type->struct_field_count >
+          SIZE_MAX / sizeof(*target->field_types) ||
+      (size_t)logical_type->struct_field_count >
+          SIZE_MAX / sizeof(*target->field_offsets)) {
+    tra_ffic_error_set(error, "Structure ABI layout is too large");
+    return 0;
+  }
+#endif
+  target->field_count = logical_type->struct_field_count;
+  target->field_types = (tra_ffic_abi_type *)calloc(
+      target->field_count, sizeof(*target->field_types));
+  target->elements = (ffi_type **)calloc(
+      (size_t)target->field_count + 1u, sizeof(*target->elements));
+  target->field_offsets = (size_t *)calloc(
+      target->field_count, sizeof(*target->field_offsets));
+  if (target->field_types == NULL || target->elements == NULL ||
+      target->field_offsets == NULL) {
+    tra_ffic_abi_type_destroy(target);
+    tra_ffic_error_set(error, "Out of memory creating structure ABI layout");
+    return 0;
+  }
+  for (index = 0u; index < target->field_count; ++index) {
+    if (!tra_ffic_abi_type_init(
+            &logical_type->struct_field_types[index], false,
+            &target->field_types[index], error)) {
+      tra_ffic_abi_type_destroy(target);
+      return 0;
+    }
+    target->elements[index] = target->field_types[index].ffi;
+  }
+  target->aggregate.size = 0u;
+  target->aggregate.alignment = 0u;
+  target->aggregate.type = FFI_TYPE_STRUCT;
+  target->aggregate.elements = target->elements;
+  target->ffi = &target->aggregate;
+  status = ffi_get_struct_offsets(FFI_DEFAULT_ABI, target->ffi,
+                                  target->field_offsets);
+  if (status != FFI_OK) {
+    tra_ffic_abi_type_destroy(target);
+    tra_ffic_error_set(error, "ffi_get_struct_offsets failed");
+    return 0;
+  }
+  return 1;
+}
+
+static inline void tra_ffic_abi_signature_destroy(
+    tra_ffic_abi_signature *signature) {
+  uint32_t index = 0u;
+  if (signature == NULL) {
+    return;
+  }
+  for (index = 0u; index < signature->arg_count; ++index) {
+    tra_ffic_abi_type_destroy(&signature->arg_types[index]);
+  }
+  tra_ffic_abi_type_destroy(&signature->return_type);
+  free(signature->arg_types);
+  memset(signature, 0, sizeof(*signature));
+}
+
+static inline int tra_ffic_abi_signature_init(
+    const tra_ffic_signature *logical_signature,
+    tra_ffic_abi_signature *target,
+    tra_ffic_error *error) {
+  uint32_t index = 0u;
+  if (logical_signature == NULL || target == NULL) {
+    tra_ffic_error_set(error, "ABI signature input is null");
+    return 0;
+  }
+  memset(target, 0, sizeof(*target));
+  target->arg_count = logical_signature->arg_count;
+  if (target->arg_count > 0u) {
+#if SIZE_MAX <= UINT32_MAX
+    if ((size_t)target->arg_count >
+        SIZE_MAX / sizeof(*target->arg_types)) {
+      tra_ffic_error_set(error, "ABI signature is too large");
+      return 0;
+    }
+#endif
+    target->arg_types = (tra_ffic_abi_type *)calloc(
+        target->arg_count, sizeof(*target->arg_types));
+    if (target->arg_types == NULL) {
+      tra_ffic_error_set(error, "Out of memory creating ABI signature");
+      return 0;
+    }
+  }
+  for (index = 0u; index < target->arg_count; ++index) {
+    if (!tra_ffic_abi_type_init(&logical_signature->arg_types[index], false,
+                                &target->arg_types[index], error)) {
+      tra_ffic_abi_signature_destroy(target);
+      return 0;
+    }
+  }
+  if (!tra_ffic_abi_type_init(logical_signature->return_type, true,
+                              &target->return_type, error)) {
+    tra_ffic_abi_signature_destroy(target);
+    return 0;
+  }
+  return 1;
 }
 
 static inline ffi_type *tra_ffic_get_callback_ffi_type(
@@ -1306,11 +1546,13 @@ static inline uint32_t tra_ffic_public_ffi_arg_count(
 
 static inline int tra_ffic_fill_public_ffi_arg_types(
     const tra_ffic_signature *signature,
+    const tra_ffic_abi_signature *abi_signature,
     ffi_type **ffi_arg_types,
     tra_ffic_error *error) {
   uint32_t index = 0u;
   uint32_t offset = 0u;
-  if (signature == NULL ||
+  if (signature == NULL || abi_signature == NULL ||
+      abi_signature->arg_count != signature->arg_count ||
       (tra_ffic_public_ffi_arg_count(signature) > 0u &&
        ffi_arg_types == NULL)) {
     tra_ffic_error_set(error, "Public ffi argument input is null");
@@ -1327,7 +1569,7 @@ static inline int tra_ffic_fill_public_ffi_arg_types(
   }
   for (index = 0u; index < signature->arg_count; ++index) {
     ffi_arg_types[index + offset] =
-        tra_ffic_get_ffi_type(&signature->arg_types[index], false);
+        abi_signature->arg_types[index].ffi;
     if (ffi_arg_types[index + offset] == NULL) {
       tra_ffic_error_set(error, "Unsupported closure argument type");
       return 0;
@@ -1361,13 +1603,15 @@ static inline uint32_t tra_ffic_callback_ffi_arg_count(
 
 static inline int tra_ffic_fill_callback_ffi_arg_types(
     const tra_ffic_signature *signature,
+    const tra_ffic_abi_signature *abi_signature,
     tra_ffic_argument_passing callback_argument_passing,
     bool passes_closure_state,
     ffi_type **callback_arg_types,
     tra_ffic_error *error) {
   uint32_t index = 0u;
   uint32_t offset = 0u;
-  if (signature == NULL ||
+  if (signature == NULL || abi_signature == NULL ||
+      abi_signature->arg_count != signature->arg_count ||
       (tra_ffic_callback_ffi_arg_count(
            signature, callback_argument_passing, passes_closure_state) > 0u &&
        callback_arg_types == NULL)) {
@@ -1389,7 +1633,7 @@ static inline int tra_ffic_fill_callback_ffi_arg_types(
   }
   for (index = 0u; index < signature->arg_count; ++index) {
     callback_arg_types[index + offset] =
-        tra_ffic_get_callback_ffi_type(&signature->arg_types[index]);
+        abi_signature->arg_types[index].ffi;
     if (callback_arg_types[index + offset] == NULL) {
       tra_ffic_error_set(error, "Unsupported callback argument type");
       return 0;
@@ -1643,8 +1887,10 @@ static inline void tra_ffic_registry_entry_destroy(void *task_data) {
     entry->finalize_user_data(entry->user_data);
   }
   tra_ffic_signature_destroy(entry->signature);
+  tra_ffic_abi_signature_destroy(&entry->abi_signature);
   if (entry->has_completion_return_type) {
     tra_ffic_type_destroy(&entry->completion_return_type);
+    tra_ffic_abi_type_destroy(&entry->completion_return_abi_type);
   }
   free(entry->ffi_arg_types);
   free(entry->callback_arg_types);
@@ -1863,6 +2109,7 @@ typedef union tra_ffic_arg_storage {
   tra_ffic_buffer_view buffer_view_value;
   const char *string_value;
   tra_ffic_native_function function_value;
+  void *struct_value;
 } tra_ffic_arg_storage;
 
 static inline void *tra_ffic_arg_storage_value_address(
@@ -1902,6 +2149,8 @@ static inline void *tra_ffic_arg_storage_value_address(
       return &storage->pointer_value;
     case TRA_FFIC_TYPE_FUNCTION:
       return &storage->function_value;
+    case TRA_FFIC_TYPE_STRUCT:
+      return storage->struct_value;
     case TRA_FFIC_TYPE_VOID:
       return NULL;
   }
@@ -1910,9 +2159,10 @@ static inline void *tra_ffic_arg_storage_value_address(
 
 static inline int tra_ffic_copy_arg_storage_to_address(
     const tra_ffic_type *type,
+    const tra_ffic_abi_type *abi_type,
     const tra_ffic_arg_storage *storage,
     void *target) {
-  if (type == NULL || storage == NULL ||
+  if (type == NULL || abi_type == NULL || storage == NULL ||
       (type->kind != TRA_FFIC_TYPE_VOID && target == NULL)) {
     return 0;
   }
@@ -1964,8 +2214,81 @@ static inline int tra_ffic_copy_arg_storage_to_address(
     case TRA_FFIC_TYPE_FUNCTION:
       *(tra_ffic_native_function *)target = storage->function_value;
       return 1;
+    case TRA_FFIC_TYPE_STRUCT:
+      memcpy(target, storage->struct_value, abi_type->ffi->size);
+      return 1;
   }
   return 0;
+}
+
+static inline void tra_ffic_arg_storage_destroy(
+    const tra_ffic_type *type,
+    tra_ffic_arg_storage *storage) {
+  if (type == NULL || storage == NULL) {
+    return;
+  }
+  if (type->kind == TRA_FFIC_TYPE_STRUCT) {
+    free(storage->struct_value);
+    storage->struct_value = NULL;
+  }
+}
+
+static inline int tra_ffic_copy_struct_fields(
+    const tra_ffic_type *type,
+    const tra_ffic_abi_type *abi_type,
+    const void *source,
+    void *target,
+    tra_ffic_error *error) {
+  const uint8_t *source_bytes = (const uint8_t *)source;
+  uint8_t *target_bytes = (uint8_t *)target;
+  uint32_t index = 0u;
+  if (type == NULL || abi_type == NULL || source == NULL || target == NULL ||
+      type->kind != TRA_FFIC_TYPE_STRUCT ||
+      abi_type->field_count != type->struct_field_count) {
+    tra_ffic_error_set(error, "Structure copy input is invalid");
+    return 0;
+  }
+  for (index = 0u; index < type->struct_field_count; ++index) {
+    const tra_ffic_type *field_type = &type->struct_field_types[index];
+    const tra_ffic_abi_type *field_abi = &abi_type->field_types[index];
+    const size_t offset = abi_type->field_offsets[index];
+    if (field_type->kind == TRA_FFIC_TYPE_STRUCT) {
+      if (!tra_ffic_copy_struct_fields(
+              field_type, field_abi, source_bytes + offset,
+              target_bytes + offset, error)) {
+        return 0;
+      }
+    } else {
+      memcpy(target_bytes + offset, source_bytes + offset,
+             field_abi->ffi->size);
+    }
+  }
+  return 1;
+}
+
+static inline int tra_ffic_store_struct_copy(
+    const tra_ffic_type *type,
+    const tra_ffic_abi_type *abi_type,
+    const void *source,
+    tra_ffic_arg_storage *storage,
+    tra_ffic_error *error) {
+  if (type == NULL || abi_type == NULL || source == NULL || storage == NULL ||
+      type->kind != TRA_FFIC_TYPE_STRUCT || abi_type->ffi == NULL ||
+      abi_type->ffi->size == 0u) {
+    tra_ffic_error_set(error, "Structure value is invalid");
+    return 0;
+  }
+  storage->struct_value = calloc(1u, abi_type->ffi->size);
+  if (storage->struct_value == NULL) {
+    tra_ffic_error_set(error, "Out of memory copying structure value");
+    return 0;
+  }
+  if (!tra_ffic_copy_struct_fields(type, abi_type, source,
+                                   storage->struct_value, error)) {
+    tra_ffic_arg_storage_destroy(type, storage);
+    return 0;
+  }
+  return 1;
 }
 
 struct tra_ffic_function_adapter_state {
@@ -2046,6 +2369,13 @@ tra_ffic_create_function_adapter_entry(
     tra_ffic_registry_entry_destroy(entry);
     return NULL;
   }
+  if (!tra_ffic_abi_signature_init(entry->signature,
+                                   &entry->abi_signature, error)) {
+    entry->user_data = state;
+    entry->finalize_user_data = tra_ffic_function_adapter_state_destroy;
+    tra_ffic_registry_entry_destroy(entry);
+    return NULL;
+  }
   state->source_ref.raw = source_entry->raw;
   state->source_ref.owner_side = source_entry->owner_side;
   state->source_ref.signature = state->source_signature;
@@ -2056,7 +2386,7 @@ tra_ffic_create_function_adapter_entry(
   native_return_type =
       tra_ffic_signature_uses_completion(entry->signature)
           ? &ffi_type_void
-          : tra_ffic_get_ffi_type(entry->signature->return_type, true);
+          : entry->abi_signature.return_type.ffi;
   if (native_return_type == NULL) {
     tra_ffic_registry_entry_destroy(entry);
     tra_ffic_error_set(error, "Unsupported adapter return type");
@@ -2073,6 +2403,7 @@ tra_ffic_create_function_adapter_entry(
     }
   }
   if (!tra_ffic_fill_public_ffi_arg_types(entry->signature,
+                                          &entry->abi_signature,
                                           entry->ffi_arg_types, error)) {
     tra_ffic_registry_entry_destroy(entry);
     return NULL;
@@ -2176,6 +2507,7 @@ static inline int tra_ffic_store_function_for_expected(
 static inline int tra_ffic_decode_raw_arg_to_storage(
     tra_ffic_side *adapter_owner_side,
     const tra_ffic_type *type,
+    const tra_ffic_abi_type *abi_type,
     void *raw_arg,
     tra_ffic_arg_storage *storage,
     tra_ffic_value *raw_value,
@@ -2184,7 +2516,8 @@ static inline int tra_ffic_decode_raw_arg_to_storage(
   if (protected_entry != NULL) {
     *protected_entry = NULL;
   }
-  if (type == NULL || raw_arg == NULL || storage == NULL) {
+  if (type == NULL || abi_type == NULL || raw_arg == NULL ||
+      storage == NULL) {
     tra_ffic_error_set(error, "Argument pointer is null");
     return 0;
   }
@@ -2293,6 +2626,15 @@ static inline int tra_ffic_decode_raw_arg_to_storage(
       }
       return 1;
     }
+    case TRA_FFIC_TYPE_STRUCT:
+      if (!tra_ffic_store_struct_copy(type, abi_type, raw_arg, storage,
+                                      error)) {
+        return 0;
+      }
+      if (raw_value != NULL) {
+        *raw_value = tra_ffic_value_struct(storage->struct_value);
+      }
+      return 1;
     case TRA_FFIC_TYPE_VOID:
       tra_ffic_error_set(error, "Void argument is invalid");
       return 0;
@@ -2304,6 +2646,7 @@ static inline int tra_ffic_decode_raw_arg_to_storage(
 static inline int tra_ffic_store_value_for_type(
     tra_ffic_side *adapter_owner_side,
     const tra_ffic_type *expected_type,
+    const tra_ffic_abi_type *abi_type,
     const tra_ffic_value *source,
     tra_ffic_arg_storage *storage,
     tra_ffic_registry_entry **protected_entry,
@@ -2312,7 +2655,8 @@ static inline int tra_ffic_store_value_for_type(
   if (protected_entry != NULL) {
     *protected_entry = NULL;
   }
-  if (expected_type == NULL || source == NULL || storage == NULL) {
+  if (expected_type == NULL || abi_type == NULL ||
+      source == NULL || storage == NULL) {
     tra_ffic_error_set(error, "Value storage input is null");
     return 0;
   }
@@ -2371,6 +2715,9 @@ static inline int tra_ffic_store_value_for_type(
       return tra_ffic_store_function_for_expected(
           adapter_owner_side, expected_type, source->as.function_value,
           storage, protected_entry, retained_adapter, error);
+    case TRA_FFIC_TYPE_STRUCT:
+      return tra_ffic_store_struct_copy(
+          expected_type, abi_type, source->as.struct_value, storage, error);
     case TRA_FFIC_TYPE_VOID:
       storage->int32_value = 0;
       return 1;
@@ -2385,6 +2732,7 @@ typedef struct tra_ffic_pending_call {
   tra_ffic_schedule_function schedule;
   void *schedule_data;
   tra_ffic_type return_type;
+  tra_ffic_abi_type return_abi_type;
   tra_ffic_result_callback result_callback;
   void *result_user_data;
   tra_ffic_registry_entry **protected_entries;
@@ -2397,6 +2745,7 @@ typedef struct tra_ffic_pending_call {
   tra_ffic_completion completion;
   tra_ffic_result result;
   char *result_string_storage;
+  void *result_struct_storage;
   bool completion_claimed;
   bool completed;
   bool native_returned;
@@ -2416,6 +2765,8 @@ static inline void tra_ffic_pending_call_destroy(
   tra_ffic_entry_release_active(pending->result_function_entry);
   free(pending->protected_entries);
   free(pending->result_string_storage);
+  free(pending->result_struct_storage);
+  tra_ffic_abi_type_destroy(&pending->return_abi_type);
   tra_ffic_type_destroy(&pending->return_type);
   tra_ffic_mutex_destroy(&pending->mutex);
   free(pending);
@@ -2543,6 +2894,20 @@ static inline int tra_ffic_copy_completion_value(
             tra_ffic_value_function(storage.function_value);
       }
       return 1;
+    case TRA_FFIC_TYPE_STRUCT: {
+      tra_ffic_arg_storage storage;
+      memset(&storage, 0, sizeof(storage));
+      if (!tra_ffic_store_struct_copy(
+              &pending->return_type, &pending->return_abi_type,
+              source, &storage, &local_error)) {
+        return tra_ffic_result_set_error(&pending->result,
+                                         local_error.message);
+      }
+      pending->result_struct_storage = storage.struct_value;
+      pending->result.value =
+          tra_ffic_value_struct(pending->result_struct_storage);
+      return 1;
+    }
     case TRA_FFIC_TYPE_VOID:
       pending->result.value = tra_ffic_value_void();
       return 1;
@@ -2660,6 +3025,13 @@ static inline tra_ffic_pending_call *tra_ffic_pending_call_create(
     tra_ffic_pending_call_destroy(pending);
     return NULL;
   }
+  if (!tra_ffic_abi_type_init(&pending->return_type, true,
+                              &pending->return_abi_type, error)) {
+    pending->protected_entries = NULL;
+    pending->protected_entry_count = 0u;
+    tra_ffic_pending_call_destroy(pending);
+    return NULL;
+  }
   status = ffi_prep_cif(&pending->completion_cif, FFI_DEFAULT_ABI, 2u,
                         &ffi_type_void, pending->completion_arg_types);
   if (status != FFI_OK) {
@@ -2734,8 +3106,10 @@ static inline int tra_ffic_side_init_pair(
   return 1;
 }
 
-static inline void tra_ffic_store_zero_return(const tra_ffic_type *return_type,
-                                              void *return_value) {
+static inline void tra_ffic_store_zero_return(
+    const tra_ffic_type *return_type,
+    const tra_ffic_abi_type *return_abi_type,
+    void *return_value) {
   tra_ffic_buffer_view empty_view;
   if (return_type == NULL || return_value == NULL) {
     return;
@@ -2786,6 +3160,11 @@ static inline void tra_ffic_store_zero_return(const tra_ffic_type *return_type,
     case TRA_FFIC_TYPE_FUNCTION:
       *(void **)return_value = NULL;
       return;
+    case TRA_FFIC_TYPE_STRUCT:
+      if (return_abi_type != NULL && return_abi_type->ffi != NULL) {
+        memset(return_value, 0, return_abi_type->ffi->size);
+      }
+      return;
   }
 }
 
@@ -2827,7 +3206,9 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
                            (entry->passes_closure_state ? 1u : 0u);
   storage_count = logical_storage_offset + entry->signature->arg_count;
   if (!uses_completion_abi) {
-    tra_ffic_store_zero_return(entry->signature->return_type, return_value);
+    tra_ffic_store_zero_return(entry->signature->return_type,
+                               &entry->abi_signature.return_type,
+                               return_value);
   }
   active_entry = tra_ffic_entry_add_active_entry(entry, NULL);
   if (active_entry == NULL) {
@@ -2919,7 +3300,8 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
     tra_ffic_registry_entry *protected_entry = NULL;
     void *value_address = NULL;
     if (!tra_ffic_decode_raw_arg_to_storage(
-            entry->owner_side, type, raw_arg, storage,
+            entry->owner_side, type,
+            &entry->abi_signature.arg_types[index], raw_arg, storage,
             raw_values != NULL ? &raw_values[index] : NULL,
             &protected_entry, &local_error)) {
       if (completion != NULL) {
@@ -2958,6 +3340,13 @@ cleanup:
   for (index = 0u; index < protected_count; ++index) {
     tra_ffic_entry_release_active(protected_entries[index]);
   }
+  if (storages != NULL) {
+    for (index = 0u; index < entry->signature->arg_count; ++index) {
+      tra_ffic_arg_storage_destroy(
+          &entry->signature->arg_types[index],
+          &storages[logical_storage_offset + index]);
+    }
+  }
   tra_ffic_entry_release_active(active_entry);
   free(protected_entries);
   free(raw_values);
@@ -2990,6 +3379,15 @@ static inline int tra_ffic_type_contains_function(
   }
   if (type->kind == TRA_FFIC_TYPE_FUNCTION) {
     return 1;
+  }
+  if (type->kind == TRA_FFIC_TYPE_STRUCT) {
+    uint32_t index = 0u;
+    for (index = 0u; index < type->struct_field_count; ++index) {
+      if (tra_ffic_type_contains_function(
+              &type->struct_field_types[index])) {
+        return 1;
+      }
+    }
   }
   return 0;
 }
@@ -3088,6 +3486,11 @@ static inline int tra_ffic_side_create_function(
     free(entry);
     return 0;
   }
+  if (!tra_ffic_abi_signature_init(entry->signature,
+                                   &entry->abi_signature, error)) {
+    tra_ffic_registry_entry_destroy(entry);
+    return 0;
+  }
   entry->raw = callback_function;
   entry->callback = callback;
   entry->user_data = user_data;
@@ -3099,8 +3502,7 @@ static inline int tra_ffic_side_create_function(
       entry->signature->abi == TRA_FFIC_SIGNATURE_ABI_COMPLETION;
   native_return_type = uses_completion_abi
                            ? &ffi_type_void
-                           : tra_ffic_get_ffi_type(entry->signature->return_type,
-                                                   true);
+                           : entry->abi_signature.return_type.ffi;
   if (native_return_type == NULL) {
     tra_ffic_registry_entry_destroy(entry);
     tra_ffic_error_set(error, "Unsupported closure return type");
@@ -3117,6 +3519,7 @@ static inline int tra_ffic_side_create_function(
     }
   }
   if (!tra_ffic_fill_public_ffi_arg_types(entry->signature,
+                                          &entry->abi_signature,
                                           entry->ffi_arg_types, error)) {
     tra_ffic_registry_entry_destroy(entry);
     return 0;
@@ -3135,8 +3538,7 @@ static inline int tra_ffic_side_create_function(
   }
   callback_return_type = uses_completion_abi
                              ? &ffi_type_void
-                             : tra_ffic_get_ffi_type(
-                                   entry->signature->return_type, true);
+                             : entry->abi_signature.return_type.ffi;
   if (callback_return_type == NULL) {
     tra_ffic_registry_entry_destroy(entry);
     tra_ffic_error_set(error, "Unsupported callback return type");
@@ -3155,7 +3557,8 @@ static inline int tra_ffic_side_create_function(
     }
   }
   if (!tra_ffic_fill_callback_ffi_arg_types(
-          entry->signature, entry->callback_argument_passing,
+          entry->signature, &entry->abi_signature,
+          entry->callback_argument_passing,
           entry->passes_closure_state, entry->callback_arg_types, error)) {
     tra_ffic_registry_entry_destroy(entry);
     return 0;
@@ -3304,6 +3707,11 @@ static inline int tra_ffic_side_create_raw_closure_impl(
     free(entry);
     return 0;
   }
+  if (!tra_ffic_abi_signature_init(entry->signature,
+                                   &entry->abi_signature, error)) {
+    tra_ffic_registry_entry_destroy(entry);
+    return 0;
+  }
   entry->raw_closure_callback = callback;
   entry->user_data = closure_state;
   entry->finalize_user_data = finalize_user_data;
@@ -3318,6 +3726,7 @@ static inline int tra_ffic_side_create_raw_closure_impl(
     return 0;
   }
   if (!tra_ffic_fill_public_ffi_arg_types(entry->signature,
+                                          &entry->abi_signature,
                                           entry->ffi_arg_types, error)) {
     tra_ffic_registry_entry_destroy(entry);
     return 0;
@@ -3533,6 +3942,20 @@ static inline int tra_ffic_completion_copy_value(
       }
       delivery->function_entry = function_entry;
       return 1;
+    case TRA_FFIC_TYPE_STRUCT:
+      if (source == NULL) {
+        delivery->has_error = true;
+        tra_ffic_error_set(&delivery->error, "Completion result is null");
+        return 1;
+      }
+      if (!tra_ffic_store_struct_copy(
+              &entry->completion_return_type,
+              &entry->completion_return_abi_type, source,
+              &delivery->storage, &local_error)) {
+        delivery->has_error = true;
+        tra_ffic_error_set(&delivery->error, local_error.message);
+      }
+      return 1;
   }
   delivery->has_error = true;
   tra_ffic_error_set(&delivery->error, "Completion type is unsupported");
@@ -3544,6 +3967,11 @@ static inline void tra_ffic_completion_delivery_destroy(
   if (delivery == NULL) {
     return;
   }
+  if (delivery->completion_entry != NULL) {
+    tra_ffic_arg_storage_destroy(
+        &delivery->completion_entry->completion_return_type,
+        &delivery->storage);
+  }
   tra_ffic_entry_release_active(delivery->function_entry);
   tra_ffic_entry_release_active(delivery->completion_entry);
   free(delivery->string_storage);
@@ -3551,8 +3979,12 @@ static inline void tra_ffic_completion_delivery_destroy(
 }
 
 static inline ffi_type *tra_ffic_completion_callback_value_ffi_type(
-    const tra_ffic_type *type) {
-  return tra_ffic_get_ffi_type(type, false);
+    const tra_ffic_type *type,
+    const tra_ffic_abi_type *abi_type) {
+  if (type == NULL || abi_type == NULL) {
+    return NULL;
+  }
+  return abi_type->ffi;
 }
 
 static inline void tra_ffic_completion_delivery_task(void *task_data) {
@@ -3580,7 +4012,8 @@ static inline void tra_ffic_completion_delivery_task(void *task_data) {
   if (entry->completion_return_type.kind != TRA_FFIC_TYPE_VOID) {
     void *value_address = NULL;
     arg_types[arg_count] = tra_ffic_completion_callback_value_ffi_type(
-        &entry->completion_return_type);
+        &entry->completion_return_type,
+        &entry->completion_return_abi_type);
     if (arg_types[arg_count] == NULL) {
       tra_ffic_completion_delivery_destroy(delivery);
       return;
@@ -3701,6 +4134,11 @@ static inline int tra_ffic_side_create_completion_function_impl(
     free(entry);
     return 0;
   }
+  if (!tra_ffic_abi_type_init(&entry->completion_return_type, true,
+                              &entry->completion_return_abi_type, error)) {
+    tra_ffic_registry_entry_destroy(entry);
+    return 0;
+  }
   entry->ffi_arg_count = 2u;
   entry->ffi_arg_types =
       (ffi_type **)calloc(entry->ffi_arg_count, sizeof(*entry->ffi_arg_types));
@@ -3769,6 +4207,7 @@ static inline void tra_ffic_side_destroy(tra_ffic_side *side) {
 static inline int tra_ffic_validate_and_store_arg(
     tra_ffic_side *caller_side,
     const tra_ffic_type *expected_type,
+    const tra_ffic_abi_type *abi_type,
     const tra_ffic_value *source,
     tra_ffic_arg_storage *storage,
     tra_ffic_registry_entry **protected_entry,
@@ -3776,7 +4215,8 @@ static inline int tra_ffic_validate_and_store_arg(
   tra_ffic_error local_error;
   tra_ffic_error_clear(&local_error);
   *protected_entry = NULL;
-  if (expected_type == NULL || source == NULL || storage == NULL) {
+  if (expected_type == NULL || abi_type == NULL ||
+      source == NULL || storage == NULL) {
     tra_ffic_error_set(error, "Argument input is null");
     return 0;
   }
@@ -3845,6 +4285,9 @@ static inline int tra_ffic_validate_and_store_arg(
       }
       (void)caller_side;
       return 1;
+    case TRA_FFIC_TYPE_STRUCT:
+      return tra_ffic_store_struct_copy(
+          expected_type, abi_type, source->as.struct_value, storage, error);
     case TRA_FFIC_TYPE_VOID:
       tra_ffic_error_set(error, "Void argument is invalid");
       return 0;
@@ -3918,6 +4361,9 @@ static inline int tra_ffic_result_set_retval_from_storage(
     case TRA_FFIC_TYPE_FUNCTION:
       result->value = tra_ffic_value_function(storage->function_value);
       return 1;
+    case TRA_FFIC_TYPE_STRUCT:
+      result->value = tra_ffic_value_struct(storage->struct_value);
+      return 1;
   }
   return tra_ffic_result_set_error(result, "Retval type is unsupported");
 }
@@ -3982,6 +4428,7 @@ static inline int tra_ffic_call_with_retval_result(
     void *value_address = NULL;
     if (!tra_ffic_validate_and_store_arg(
             caller_side, &target_ref->signature->arg_types[index],
+            &target_entry->abi_signature.arg_types[index],
             &args[index], &storages[index], &protected_entry, error)) {
       goto cleanup;
     }
@@ -4008,6 +4455,20 @@ static inline int tra_ffic_call_with_retval_result(
     ffi_values[0] = &pointer_arg_list_value;
   }
   if (target_ref->signature->return_type->kind != TRA_FFIC_TYPE_VOID) {
+    if (target_ref->signature->return_type->kind ==
+        TRA_FFIC_TYPE_STRUCT) {
+      size_t return_size =
+          target_entry->abi_signature.return_type.ffi->size;
+      if (return_size < sizeof(ffi_arg)) {
+        return_size = sizeof(ffi_arg);
+      }
+      return_storage.struct_value = calloc(1u, return_size);
+      if (return_storage.struct_value == NULL) {
+        tra_ffic_error_set(error,
+                           "Out of memory preparing structure return");
+        goto cleanup;
+      }
+    }
     return_address = tra_ffic_arg_storage_value_address(
         target_ref->signature->return_type->kind, &return_storage);
     if (return_address == NULL) {
@@ -4038,6 +4499,14 @@ cleanup:
   for (index = 0u; index < protected_count; ++index) {
     tra_ffic_entry_release_active(protected_entries[index]);
   }
+  if (storages != NULL) {
+    for (index = 0u; index < arg_count; ++index) {
+      tra_ffic_arg_storage_destroy(
+          &target_ref->signature->arg_types[index], &storages[index]);
+    }
+  }
+  tra_ffic_arg_storage_destroy(target_ref->signature->return_type,
+                               &return_storage);
   free(protected_entries);
   free(storages);
   free(pointer_arg_list);
@@ -4116,6 +4585,7 @@ static inline int tra_ffic_call_with_result(
     tra_ffic_registry_entry *protected_entry = NULL;
     if (!tra_ffic_validate_and_store_arg(
             caller_side, &target_ref->signature->arg_types[index],
+            &target_entry->abi_signature.arg_types[index],
             &args[index], &storages[index + 1u], &protected_entry, error)) {
       goto cleanup;
     }
@@ -4168,6 +4638,13 @@ cleanup:
   for (index = 0u; index < protected_count; ++index) {
     tra_ffic_entry_release_active(protected_entries[index]);
   }
+  if (storages != NULL) {
+    for (index = 0u; index < arg_count; ++index) {
+      tra_ffic_arg_storage_destroy(
+          &target_ref->signature->arg_types[index],
+          &storages[index + 1u]);
+    }
+  }
   free(protected_entries);
   free(storages);
   free(pointer_arg_list);
@@ -4180,6 +4657,7 @@ typedef struct tra_ffic_adapter_completion_state {
   tra_ffic_side *owner_side;
   tra_ffic_completion completion;
   tra_ffic_type return_type;
+  tra_ffic_abi_type return_abi_type;
 } tra_ffic_adapter_completion_state;
 
 static inline void tra_ffic_adapter_completion_state_destroy(
@@ -4187,6 +4665,7 @@ static inline void tra_ffic_adapter_completion_state_destroy(
   if (state == NULL) {
     return;
   }
+  tra_ffic_abi_type_destroy(&state->return_abi_type);
   tra_ffic_type_destroy(&state->return_type);
   free(state);
 }
@@ -4195,6 +4674,7 @@ static inline void tra_ffic_adapter_complete_from_result(
     tra_ffic_side *owner_side,
     tra_ffic_completion completion,
     const tra_ffic_type *return_type,
+    const tra_ffic_abi_type *return_abi_type,
     const tra_ffic_result *result) {
   tra_ffic_arg_storage storage;
   tra_ffic_registry_entry *protected_entry = NULL;
@@ -4202,7 +4682,8 @@ static inline void tra_ffic_adapter_complete_from_result(
   void *value_address = NULL;
   memset(&storage, 0, sizeof(storage));
   tra_ffic_error_clear(&error);
-  if (completion == NULL || return_type == NULL) {
+  if (completion == NULL || return_type == NULL ||
+      return_abi_type == NULL) {
     return;
   }
   if (result == NULL) {
@@ -4217,9 +4698,9 @@ static inline void tra_ffic_adapter_complete_from_result(
     completion(NULL, NULL);
     return;
   }
-  if (!tra_ffic_store_value_for_type(owner_side, return_type, &result->value,
-                                     &storage, &protected_entry, false,
-                                     &error)) {
+  if (!tra_ffic_store_value_for_type(
+          owner_side, return_type, return_abi_type, &result->value,
+          &storage, &protected_entry, false, &error)) {
     completion(NULL, error.message);
     return;
   }
@@ -4227,6 +4708,7 @@ static inline void tra_ffic_adapter_complete_from_result(
       tra_ffic_arg_storage_value_address(return_type->kind, &storage);
   completion(value_address, NULL);
   tra_ffic_entry_release_active(protected_entry);
+  tra_ffic_arg_storage_destroy(return_type, &storage);
 }
 
 static inline void tra_ffic_adapter_completion_callback(
@@ -4238,7 +4720,8 @@ static inline void tra_ffic_adapter_completion_callback(
     return;
   }
   tra_ffic_adapter_complete_from_result(
-      state->owner_side, state->completion, &state->return_type, result);
+      state->owner_side, state->completion, &state->return_type,
+      &state->return_abi_type, result);
   tra_ffic_adapter_completion_state_destroy(state);
 }
 
@@ -4324,7 +4807,9 @@ static inline int tra_ffic_adapter_decode_args(
             : args[index + native_arg_offset];
     tra_ffic_registry_entry *protected_entry = NULL;
     if (!tra_ffic_decode_raw_arg_to_storage(
-            entry->owner_side, type, raw_arg, &storages[index],
+            entry->owner_side, type,
+            &entry->abi_signature.arg_types[index], raw_arg,
+            &storages[index],
             &values[index], &protected_entry, error)) {
       uint32_t release_index = 0u;
       for (release_index = 0u; release_index < protected_count;
@@ -4375,7 +4860,9 @@ static inline void tra_ffic_function_adapter_trampoline(
     return;
   }
   if (!uses_completion_abi) {
-    tra_ffic_store_zero_return(entry->signature->return_type, return_value);
+    tra_ffic_store_zero_return(entry->signature->return_type,
+                               &entry->abi_signature.return_type,
+                               return_value);
   }
   active_entry = tra_ffic_entry_add_active_entry(entry, NULL);
   if (active_entry == NULL) {
@@ -4399,6 +4886,15 @@ static inline void tra_ffic_function_adapter_trampoline(
       free(completion_state);
       if (completion != NULL) {
         completion(NULL, "Out of memory creating adapter completion");
+      }
+      goto cleanup;
+    }
+    if (!tra_ffic_abi_type_init(
+            &completion_state->return_type, true,
+            &completion_state->return_abi_type, &error)) {
+      tra_ffic_adapter_completion_state_destroy(completion_state);
+      if (completion != NULL) {
+        completion(NULL, error.message);
       }
       goto cleanup;
     }
@@ -4431,11 +4927,15 @@ static inline void tra_ffic_function_adapter_trampoline(
       memset(&storage, 0, sizeof(storage));
       if (tra_ffic_store_value_for_type(
               entry->owner_side, entry->signature->return_type,
+              &entry->abi_signature.return_type,
               &capture.result.value, &storage, &result_function_entry, true,
               &error)) {
         (void)tra_ffic_copy_arg_storage_to_address(
-            entry->signature->return_type, &storage, return_value);
+            entry->signature->return_type,
+            &entry->abi_signature.return_type, &storage, return_value);
         tra_ffic_entry_release_active(result_function_entry);
+        tra_ffic_arg_storage_destroy(entry->signature->return_type,
+                                     &storage);
       }
     }
   }
@@ -4565,6 +5065,8 @@ static inline int tra_ffic_invoke_success_callback(
       ffi_values[1] = &storages[1].function_value;
       arg_count = 2u;
       break;
+    case TRA_FFIC_TYPE_STRUCT:
+      return 0;
   }
   status =
       ffi_prep_cif(&cif, FFI_DEFAULT_ABI, arg_count, &ffi_type_void,
