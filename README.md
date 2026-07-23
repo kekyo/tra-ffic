@@ -219,13 +219,16 @@ int main(void) {
   // After releasing created function pointers, destroy the sides and queue.
   tra_ffic_side_destroy(&side_a);
   tra_ffic_side_destroy(&side_b);
+  // Execute destruction tasks scheduled by the sides.
+  tra_ffic_task_drain_finalization(&queue);
   tra_ffic_task_queue_destroy(&queue);
   return 0;
 }
 ```
 
 After initialization, register a function on one side, create a completion function on the other side, and call it.
-Release generated function pointers with `tra_ffic_function_release()` after use. This is described later.
+Release caller-owned function pointers returned by create APIs with `tra_ffic_function_release()` after use. This is described later.
+Before calling `tra_ffic_side_destroy()`, prevent new calls that can reach the side, including calls through adapters, and wait for all calls and completion deliveries involving it to finish. Destroying a side that is still in use is unsupported.
 
 When a notification callback is passed as the second argument to `tra_ffic_task_queue_init()`, it is invoked with the third-argument user state when pending completion requests exist.
 tra-ffic does not use internal worker threads, so note that this callback runs in the thread context where the completion request was created.
@@ -243,7 +246,7 @@ This is required because tra-ffic internally performs automated marshaling: it r
 Therefore, the first step is to build a function signature.
 
 To build a function signature, you need to identify the argument and return-value types.
-The types available in tra-ffic, excluding function pointers, are `void`, `bool`, `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `pointer` (`void *`), `buffer_view` (`tra_ffic_buffer_view`), and `string` (string: `const char *`).
+The types available in tra-ffic, excluding function pointers, are `void`, `bool`, `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `pointer` (`void *`), `buffer_view` (`tra_ffic_buffer_view`), `string` (string: `const char *`), and `struct` (a native C structure passed by value).
 
 - Use `tra_ffic_type_*` to describe these types.
 - `void` is only for return values and cannot be used as an argument.
@@ -251,6 +254,7 @@ The types available in tra-ffic, excluding function pointers, are `void`, `bool`
 - `pointer` is treated as a borrowed `void *`, and `NULL` can be passed.
 - `buffer_view` is treated as a borrowed mutable byte span, `struct { void *data; uintptr_t size; }`. `data` may be `NULL` only when `size` is zero.
 - `string` is treated as a borrowed `const char *`, and `NULL` can be passed.
+- `struct` is described by `tra_ffic_type_struct()` with one type descriptor for each field in native declaration order.
 - Function pointer values can also be passed and returned as `NULL`; a `NULL` function pointer is propagated as a value and is not registered as a closure.
 - Strings returned as completion values are copied by tra-ffic before being passed to the result callback.
 - Buffer views returned as completion values do not copy the pointed-to buffer; only the view structure is copied.
@@ -279,6 +283,108 @@ tra_ffic_signature signature = tra_ffic_signature_stack(
 ```
 
 - Note that the function signature does not include the function name (`foobar` here).
+
+### Structure Types
+
+`tra_ffic_type_struct()` describes a native C structure as an ordered list of field types. Field names are not part of the metadata; the field count, order, types, and nesting must exactly match the C declaration.
+
+When a function is registered, tra-ffic recursively clones this logical metadata and compiles a private libffi ABI graph. Each structure becomes an `ffi_type` structure whose elements describe its fields, and `ffi_get_struct_offsets()` calculates their offsets. A function field is represented to libffi as a native pointer while its nested tra-ffic signature is retained for function-adapter generation. Applications do not construct or manage `ffi_type` objects themselves.
+
+For example, the following native structure contains a function in a nested structure:
+
+```c
+typedef struct request_type_equivalent {
+  int32_t request_id;
+  struct {
+    item_callback on_item;
+  } callbacks;
+  const char *label;
+} request_type_equivalent;
+```
+
+The following example expresses it as logical metadata:
+
+```c
+typedef void (*item_callback)(
+    tra_ffic_completion completion,
+    int32_t item_id);
+
+typedef struct hooks {
+  item_callback on_item;
+} hooks;
+
+typedef struct request {
+  int32_t request_id;
+  hooks callbacks;
+  const char *label;
+} request;
+
+tra_ffic_type callback_arg_types[] = {
+    tra_ffic_type_int32(),
+};
+tra_ffic_type callback_return_type = tra_ffic_type_void();
+tra_ffic_signature callback_signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    1u,
+    callback_arg_types,
+    &callback_return_type);
+
+tra_ffic_type hooks_field_types[] = {
+    tra_ffic_type_function(&callback_signature),
+};
+tra_ffic_type hooks_type =
+    tra_ffic_type_struct(1u, hooks_field_types);
+
+tra_ffic_type request_field_types[] = {
+    tra_ffic_type_int32(),
+    hooks_type,
+    tra_ffic_type_string(),
+};
+tra_ffic_type request_type =
+    tra_ffic_type_struct(3u, request_field_types);
+
+tra_ffic_type receive_arg_types[] = {
+    request_type,
+};
+tra_ffic_type receive_return_type = tra_ffic_type_void();
+tra_ffic_signature receive_signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    1u,
+    receive_arg_types,
+    &receive_return_type);
+```
+
+The descriptor-building helpers borrow their metadata arguments. Function-registration APIs recursively clone the full graph, so local metadata arrays may be discarded after registration succeeds. A manually constructed `tra_ffic_function_ref`, or one filled by `tra_ffic_function_ref_from_raw()`, must keep its referenced signature metadata alive while the reference is used.
+
+Structured call helpers use `tra_ffic_value_struct(&value)`. The pointer is borrowed and must be non-`NULL` and point to a value with the exact native layout described by the matching metadata.
+
+Structure fields are marshaled recursively:
+
+| Field kind | Arguments | Completion result | RETVAL result |
+|---|---|---|---|
+| Scalars and nested structures | Copied by value | Copied by value | Returned by value |
+| `string` | String pointer is borrowed | String contents are copied recursively | Borrowed |
+| `pointer` | Borrowed | Borrowed | Borrowed |
+| `buffer_view` | View is copied; buffer is borrowed | View is copied; buffer is borrowed | View is copied; buffer is borrowed |
+| `function` | Valid for the callback; retain it if stored | Valid for the result callback; retain it if stored | Borrowed in v1 |
+
+Function fields may be `NULL`. Non-`NULL` fields must refer to functions registered with tra-ffic. If the registered function has the same logical signature but uses the other argument-passing form (`stack` or `pointer-list`), tra-ffic creates an adapter automatically. This applies recursively to functions in nested structures and to structures nested in function signatures. If a function received through an argument or completion callback is stored after that callback returns, call `tra_ffic_function_retain()` and later balance it with `tra_ffic_function_release()`.
+
+For a synchronous RETVAL result, an adapter synthesized by tra-ffic remains owned by its side so the borrowed returned pointer stays callable until that side is destroyed. Receiving a borrowed RETVAL function does not add caller ownership, so do not release it unless you first retain it. If an application needs to extend its lifetime explicitly, call `tra_ffic_function_retain()` and later release exactly that retain. No retain remains valid after the owning side is destroyed.
+
+If any nested field is invalid, all scratch storage and function adapters created for that conversion are rolled back. Completion ABI calls report an error. A RETVAL closure cannot report an error, so it returns the zero value for the declared return type.
+
+Only ordinary, non-empty C structures using the platform's natural ABI layout are supported. The following are not supported:
+
+- packed structures;
+- unions and bit-fields;
+- C arrays and flexible array members;
+- empty structures;
+- explicitly over-aligned structures or fields;
+- cyclic/by-value-recursive metadata;
+- metadata deeper than `TRA_FFIC_MAX_TYPE_DEPTH` (currently 16).
+
+The metadata does not include a user-supplied size, alignment, or offset. Therefore, the compiler's C layout must agree with libffi for every field. Do not use structure metadata to describe a layout produced by serialization, `#pragma pack`, or a foreign ABI.
 
 ### Completion Functions (TRA_FFIC_SIGNATURE_ABI_COMPLETION)
 
@@ -490,7 +596,7 @@ int main(void) {
 > but it can also be implemented with `TRA_FFIC_SIGNATURE_ABI_RETVAL`.
 
 Closure functions store their information in dynamically allocated memory.
-If you do nothing, the function is automatically released when the function call completes, which means when the completion-function call completes.
+tra-ffic automatically releases the temporary active protection used while a call or completion delivery is running. This does not release the caller-owned retain returned by a create API.
 
 The closure function returned by `tra_ffic_side_create_closure()` has an internal reference count of 1, so it must be released with `tra_ffic_function_release()` after use.
 
