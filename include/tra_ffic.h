@@ -680,7 +680,13 @@ static inline tra_ffic_type tra_ffic_type_buffer_view(void) {
   return tra_ffic_type_leaf(TRA_FFIC_TYPE_BUFFER_VIEW);
 }
 
-/** Returns a closed function type descriptor for the given signature. */
+/**
+ * Returns a closed function type descriptor for the given signature.
+ *
+ * @param signature Borrowed non-null signature metadata for the function.
+ * @return A function type descriptor that refers to signature.
+ * @remarks A registration API recursively clones the signature metadata.
+ */
 static inline tra_ffic_type tra_ffic_type_function(
     const tra_ffic_signature *signature) {
   tra_ffic_type type = tra_ffic_type_leaf(TRA_FFIC_TYPE_FUNCTION);
@@ -691,7 +697,13 @@ static inline tra_ffic_type tra_ffic_type_function(
 /**
  * Returns a native structure type descriptor.
  *
- * Fields must be listed in the same order as their native C declaration.
+ * @param field_count Number of native fields. Must be greater than zero.
+ * @param field_types Borrowed non-void field metadata in declaration order.
+ * @return A structure type descriptor that refers to field_types.
+ * @remarks Fields must use the natural C ABI layout calculated by libffi.
+ * Packed structures, unions, bit-fields, arrays, flexible array members,
+ * explicitly over-aligned structures, and cyclic by-value metadata are not
+ * supported. A registration API recursively clones the field metadata.
  */
 static inline tra_ffic_type tra_ffic_type_struct(
     uint32_t field_count,
@@ -861,7 +873,15 @@ static inline tra_ffic_value tra_ffic_value_function(
   return value;
 }
 
-/** Returns a borrowed native structure runtime value. */
+/**
+ * Returns a borrowed native structure runtime value.
+ *
+ * @param source Borrowed address of a non-null native structure value.
+ * @return A runtime value referring to source.
+ * @remarks source must remain readable while the consuming call prepares its
+ * arguments and must have the natural C layout described by the matching
+ * tra_ffic_type_struct metadata.
+ */
 static inline tra_ffic_value tra_ffic_value_struct(const void *source) {
   tra_ffic_value value;
   value.kind = TRA_FFIC_TYPE_STRUCT;
@@ -4304,7 +4324,16 @@ static inline int tra_ffic_side_create_completion_function_impl(
   return 1;
 }
 
-/** Releases all closures currently owned by side. */
+/**
+ * Invalidates registered functions and schedules their destruction.
+ *
+ * @param side Side whose registered functions are released.
+ * @remarks Prevent new calls that can reach side, including through adapters,
+ * and wait for all calls and completion deliveries involving side to finish
+ * before this function is called. Concurrent use during destruction is not
+ * supported, and no retained function remains valid after destruction. Keep
+ * the scheduler alive and drain scheduled destruction tasks afterward.
+ */
 static inline void tra_ffic_side_destroy(tra_ffic_side *side) {
   tra_ffic_registry_entry *entries = NULL;
   tra_ffic_registry_entry *entry = NULL;

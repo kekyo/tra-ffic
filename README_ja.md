@@ -217,13 +217,16 @@ int main(void) {
   // 生成した関数ポインタを解放したあと、サイドとキューを破棄する
   tra_ffic_side_destroy(&side_a);
   tra_ffic_side_destroy(&side_b);
+  // サイドが予約した破棄タスクを実行する
+  tra_ffic_task_drain_finalization(&queue);
   tra_ffic_task_queue_destroy(&queue);
   return 0;
 }
 ```
 
 初期化後は、片方のサイドに関数を登録し、もう片方のサイドで完了関数を作成して呼び出します。
-生成した関数ポインタは使用後に `tra_ffic_function_release()` で解放します（後述）。
+create APIが呼び出し元所有として返した関数ポインタは、使用後に `tra_ffic_function_release()` で解放します（後述）。
+`tra_ffic_side_destroy()` を呼び出す前に、アダプター経由を含め、そのサイドへ到達し得る新しい呼び出しを停止し、関係する呼び出しと完了配送がすべて終わるまで待機してください。使用中のサイドを破棄する操作は未対応です。
 
 `tra_ffic_task_queue_init()` の第2引数に通知コールバックを渡すと、待機中の完了要求が存在する場合に第3引数のユーザーステートと共に呼び出されます。
 tra-fficは内部でワーカースレッドを使用していないため、このコールバックは完了要求発生時の任意のスレッドコンテキストで呼び出されることに注意して下さい。
@@ -241,7 +244,7 @@ tra-fficは内部でワーカースレッドを使用していないため、こ
 従って、まず関数シグネチャを構築することから始めます。
 
 関数シグネチャを構築するには、引数と戻り値の型を明らかにする必要があります。
-tra-fficで使用できる型は、関数ポインタを除くと、`void`、`bool`、`int8`、`uint8`、`int16`、`uint16`、`int32`、`uint32`、`int64`、`uint64`、`float`、`double`、`pointer` (`void *`)、`buffer_view` (`tra_ffic_buffer_view`)、`string` (文字列: `const char *`)です。
+tra-fficで使用できる型は、関数ポインタを除くと、`void`、`bool`、`int8`、`uint8`、`int16`、`uint16`、`int32`、`uint32`、`int64`、`uint64`、`float`、`double`、`pointer` (`void *`)、`buffer_view` (`tra_ffic_buffer_view`)、`string` (文字列: `const char *`)、`struct`（値渡しされるネイティブC構造体）です。
 
 - これらの型は `tra_ffic_type_*` を使って型を記述します。
 - `void` は戻り値専用で、引数には使用できません。
@@ -249,6 +252,7 @@ tra-fficで使用できる型は、関数ポインタを除くと、`void`、`bo
 - `pointer` は借用 `void *` として扱われ、`NULL` を渡せます。
 - `buffer_view` は `struct { void *data; uintptr_t size; }` の借用ミュータブルバイト列として扱われます。`data` は `size` がゼロの場合にだけ `NULL` にできます。
 - `string` は借用 `const char *` として扱われ、`NULL` を渡せます。
+- `struct` は `tra_ffic_type_struct()` を使い、ネイティブ宣言順に各フィールドの型を1つずつ記述します。
 - 関数ポインタ値も引数や戻り値として `NULL` を渡せます。`NULL` 関数ポインタは値として伝搬され、クロージャとして登録されません。
 - 完了値として返された文字列は、結果コールバックに渡す前に tra-ffic がコピーします。
 - 完了値として返された `buffer_view` は、指し示すバッファ本体をコピーせず、ビュー構造体だけをコピーします。
@@ -277,6 +281,108 @@ tra_ffic_signature signature = tra_ffic_signature_stack(
 ```
 
 - 関数シグネチャには関数名 (ここでは `foobar`) が含まれないことに注意して下さい。
+
+### 構造体型
+
+`tra_ffic_type_struct()` は、ネイティブC構造体を順序付きのフィールド型一覧として記述します。フィールド名はメタデータに含まれません。フィールド数・順序・型・ネストはC宣言と完全に一致させる必要があります。
+
+関数を登録すると、tra-fficはこの論理メタデータを再帰的に複製し、libffi用のプライベートなABIグラフを構築します。各構造体はフィールド要素を持つ `ffi_type` 構造体になり、`ffi_get_struct_offsets()` で各フィールドのオフセットを計算します。関数フィールドはlibffiにはネイティブポインタとして渡し、ネストしたtra-fficシグネチャは関数アダプター生成用に保持します。アプリケーションが `ffi_type` を直接構築・管理する必要はありません。
+
+例えば、次のネイティブ構造体は、ネストした構造体内に関数を持ちます:
+
+```c
+typedef struct request_type_equivalent {
+  int32_t request_id;
+  struct {
+    item_callback on_item;
+  } callbacks;
+  const char *label;
+} request_type_equivalent;
+```
+
+これを論理メタデータで表現する例を示します:
+
+```c
+typedef void (*item_callback)(
+    tra_ffic_completion completion,
+    int32_t item_id);
+
+typedef struct hooks {
+  item_callback on_item;
+} hooks;
+
+typedef struct request {
+  int32_t request_id;
+  hooks callbacks;
+  const char *label;
+} request;
+
+tra_ffic_type callback_arg_types[] = {
+    tra_ffic_type_int32(),
+};
+tra_ffic_type callback_return_type = tra_ffic_type_void();
+tra_ffic_signature callback_signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    1u,
+    callback_arg_types,
+    &callback_return_type);
+
+tra_ffic_type hooks_field_types[] = {
+    tra_ffic_type_function(&callback_signature),
+};
+tra_ffic_type hooks_type =
+    tra_ffic_type_struct(1u, hooks_field_types);
+
+tra_ffic_type request_field_types[] = {
+    tra_ffic_type_int32(),
+    hooks_type,
+    tra_ffic_type_string(),
+};
+tra_ffic_type request_type =
+    tra_ffic_type_struct(3u, request_field_types);
+
+tra_ffic_type receive_arg_types[] = {
+    request_type,
+};
+tra_ffic_type receive_return_type = tra_ffic_type_void();
+tra_ffic_signature receive_signature = tra_ffic_signature_stack(
+    TRA_FFIC_SIGNATURE_ABI_COMPLETION,
+    1u,
+    receive_arg_types,
+    &receive_return_type);
+```
+
+型記述ヘルパーは、引数のメタデータを借用します。関数登録APIはグラフ全体を再帰的に複製するため、登録成功後はローカルなメタデータ配列を破棄できます。`tra_ffic_function_ref` を手動で構築する場合、または `tra_ffic_function_ref_from_raw()` で取得する場合は、その参照を使い終わるまで参照先のシグネチャメタデータを生存させてください。
+
+構造化呼び出しヘルパーでは `tra_ffic_value_struct(&value)` を使用します。このポインタは借用され、`NULL` にはできません。また、対応するメタデータが示すネイティブレイアウトと完全に一致する値を指す必要があります。
+
+構造体フィールドは再帰的にマーシャリングされます。
+
+| フィールド型 | 引数 | 完了結果 | RETVAL結果 |
+|---|---|---|---|
+| スカラーとネスト構造体 | 値をコピー | 値をコピー | 値として返却 |
+| `string` | 文字列ポインタを借用 | 文字列内容を再帰的にコピー | 借用 |
+| `pointer` | 借用 | 借用 | 借用 |
+| `buffer_view` | ビューをコピーし、バッファを借用 | ビューをコピーし、バッファを借用 | ビューをコピーし、バッファを借用 |
+| `function` | コールバック中は有効。保存時はretainが必要 | 結果コールバック中は有効。保存時はretainが必要 | v1では借用 |
+
+関数フィールドには `NULL` を指定できます。非 `NULL` のフィールドは、tra-fficへ登録済みの関数を指す必要があります。登録関数の論理シグネチャが同じで引数受渡し形式だけが異なる場合（`stack` と `pointer-list`）、tra-fficはアダプターを自動生成します。この変換は、ネスト構造体内の関数や、関数シグネチャ内にネストした構造体にも再帰的に適用されます。引数または完了コールバックから受け取った関数をコールバック終了後も保存する場合は、`tra_ffic_function_retain()` を呼び、不要になった時点で対応する `tra_ffic_function_release()` を呼び出してください。
+
+同期RETVAL結果用にtra-fficが生成したアダプターは、返された借用ポインタを呼び出せるように、そのサイドが破棄されるまでサイド所有になります。借用RETVAL関数を受け取っただけでは呼び出し元の所有権は増えないため、先にretainしていない関数をreleaseしないでください。明示的に生存期間を延長する場合は `tra_ffic_function_retain()` を呼び、後でそのretain回数と同じ回数だけreleaseします。retainしていても、所有サイドの破棄後は使用できません。
+
+ネストしたフィールドのいずれかが不正な場合、その変換用に作成したスクラッチ領域と関数アダプターをすべてロールバックします。Completion ABIではエラーを通知します。RETVALクロージャはエラーを通知できないため、宣言された戻り値型のゼロ値を返します。
+
+プラットフォームの自然なABIレイアウトを使う、空ではない通常のC構造体だけをサポートします。以下は未対応です。
+
+- packed構造体
+- unionとbit-field
+- C配列とflexible array member
+- 空構造体
+- 明示的にover-alignされた構造体またはフィールド
+- 循環する、または値として自己再帰するメタデータ
+- `TRA_FFIC_MAX_TYPE_DEPTH`（現在16）を超えるメタデータ
+
+メタデータには、ユーザー指定のサイズ・アラインメント・オフセットを含めません。そのため、すべてのフィールドについて、コンパイラーのCレイアウトとlibffiの計算結果が一致する必要があります。シリアライズ形式、`#pragma pack`、異なるABIで生成されたレイアウトを構造体メタデータで記述しないでください。
 
 ### 完了関数 (TRA_FFIC_SIGNATURE_ABI_COMPLETION)
 
@@ -487,7 +593,7 @@ int main(void) {
 > `TRA_FFIC_SIGNATURE_ABI_RETVAL` で実装することも出来ます。
 
 クロージャ関数は、動的メモリ領域にその情報が保持されます。
-何もしない場合は、関数呼び出しが完了したとき（完了関数の呼び出しが完了したとき）に、自動的に解放されます。
+tra-fficは、関数呼び出し中または完了配送中に使用する一時的なactive保護を、処理完了時に自動解放します。create APIが呼び出し元所有として返したretainは自動解放されません。
 
 `tra_ffic_side_create_closure()` で得られたクロージャ関数は、内部の参照カウントが1になっているため、
 使用を終えたら `tra_ffic_function_release()` で解放する必要があります。
