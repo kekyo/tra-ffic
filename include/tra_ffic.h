@@ -346,21 +346,23 @@ struct tra_ffic_task_queue {
 typedef struct tra_ffic_registry_entry tra_ffic_registry_entry;
 typedef struct tra_ffic_function_adapter_state
     tra_ffic_function_adapter_state;
+typedef struct tra_ffic_abi_signature tra_ffic_abi_signature;
 
 typedef struct tra_ffic_abi_type {
   ffi_type aggregate;
   ffi_type *ffi;
   struct tra_ffic_abi_type *field_types;
+  tra_ffic_abi_signature *function_signature;
   ffi_type **elements;
   size_t *field_offsets;
   uint32_t field_count;
 } tra_ffic_abi_type;
 
-typedef struct tra_ffic_abi_signature {
+struct tra_ffic_abi_signature {
   tra_ffic_abi_type *arg_types;
   tra_ffic_abi_type return_type;
   uint32_t arg_count;
-} tra_ffic_abi_signature;
+};
 
 /** One side of a same-process A/B function marshaling pair. */
 struct tra_ffic_side {
@@ -448,18 +450,6 @@ static tra_ffic_registry_entry *tra_ffic_global_registry_entries = NULL;
 #else
 #error "Unsupported uintptr_t size"
 #endif
-
-static ffi_type *tra_ffic_buffer_view_ffi_elements[] = {
-    &ffi_type_pointer,
-    TRA_FFIC_FFI_TYPE_UINTPTR,
-    NULL,
-};
-static ffi_type tra_ffic_buffer_view_ffi_type = {
-    0u,
-    0u,
-    FFI_TYPE_STRUCT,
-    tra_ffic_buffer_view_ffi_elements,
-};
 
 #if defined(TRA_FFIC_TRACK_CLOSURES)
 static tra_ffic_static_mutex tra_ffic_tracker_mutex =
@@ -1371,7 +1361,7 @@ static inline ffi_type *tra_ffic_get_ffi_type(
     case TRA_FFIC_TYPE_POINTER:
       return &ffi_type_pointer;
     case TRA_FFIC_TYPE_BUFFER_VIEW:
-      return &tra_ffic_buffer_view_ffi_type;
+      return NULL;
     case TRA_FFIC_TYPE_STRING:
       return &ffi_type_pointer;
     case TRA_FFIC_TYPE_FUNCTION:
@@ -1382,13 +1372,27 @@ static inline ffi_type *tra_ffic_get_ffi_type(
   return NULL;
 }
 
+static inline void tra_ffic_abi_signature_destroy(
+    tra_ffic_abi_signature *signature);
+
+static inline int tra_ffic_abi_signature_init(
+    const tra_ffic_signature *logical_signature,
+    tra_ffic_abi_signature *target,
+    tra_ffic_error *error);
+
 static inline void tra_ffic_abi_type_destroy(tra_ffic_abi_type *type) {
   uint32_t index = 0u;
   if (type == NULL) {
     return;
   }
-  for (index = 0u; index < type->field_count; ++index) {
-    tra_ffic_abi_type_destroy(&type->field_types[index]);
+  if (type->field_types != NULL) {
+    for (index = 0u; index < type->field_count; ++index) {
+      tra_ffic_abi_type_destroy(&type->field_types[index]);
+    }
+  }
+  if (type->function_signature != NULL) {
+    tra_ffic_abi_signature_destroy(type->function_signature);
+    free(type->function_signature);
   }
   free(type->field_types);
   free(type->elements);
@@ -1408,6 +1412,60 @@ static inline int tra_ffic_abi_type_init(
     return 0;
   }
   memset(target, 0, sizeof(*target));
+  if (logical_type->kind == TRA_FFIC_TYPE_FUNCTION) {
+    target->ffi = &ffi_type_pointer;
+    target->function_signature =
+        (tra_ffic_abi_signature *)calloc(
+            1u, sizeof(*target->function_signature));
+    if (target->function_signature == NULL) {
+      tra_ffic_error_set(
+          error, "Out of memory creating function ABI signature");
+      return 0;
+    }
+    if (!tra_ffic_abi_signature_init(
+            logical_type->function_signature,
+            target->function_signature, error)) {
+      tra_ffic_abi_type_destroy(target);
+      return 0;
+    }
+    return 1;
+  }
+  if (logical_type->kind == TRA_FFIC_TYPE_BUFFER_VIEW) {
+    target->field_count = 2u;
+    target->field_types = (tra_ffic_abi_type *)calloc(
+        target->field_count, sizeof(*target->field_types));
+    target->elements =
+        (ffi_type **)calloc(3u, sizeof(*target->elements));
+    target->field_offsets = (size_t *)calloc(
+        target->field_count, sizeof(*target->field_offsets));
+    if (target->field_types == NULL || target->elements == NULL ||
+        target->field_offsets == NULL) {
+      tra_ffic_abi_type_destroy(target);
+      tra_ffic_error_set(
+          error, "Out of memory creating buffer view ABI layout");
+      return 0;
+    }
+    target->field_types[0].ffi = &ffi_type_pointer;
+    target->field_types[1].ffi = TRA_FFIC_FFI_TYPE_UINTPTR;
+    target->elements[0] = target->field_types[0].ffi;
+    target->elements[1] = target->field_types[1].ffi;
+    target->aggregate.size = 0u;
+    target->aggregate.alignment = 0u;
+    target->aggregate.type = FFI_TYPE_STRUCT;
+    target->aggregate.elements = target->elements;
+    target->ffi = &target->aggregate;
+    status = ffi_get_struct_offsets(
+        FFI_DEFAULT_ABI, target->ffi, target->field_offsets);
+    if (status != FFI_OK ||
+        target->ffi->size != sizeof(tra_ffic_buffer_view) ||
+        target->field_offsets[0] != offsetof(tra_ffic_buffer_view, data) ||
+        target->field_offsets[1] != offsetof(tra_ffic_buffer_view, size)) {
+      tra_ffic_abi_type_destroy(target);
+      tra_ffic_error_set(error, "Buffer view ABI layout is incompatible");
+      return 0;
+    }
+    return 1;
+  }
   if (logical_type->kind != TRA_FFIC_TYPE_STRUCT) {
     target->ffi = tra_ffic_get_ffi_type(logical_type, for_return);
     if (target->ffi == NULL) {
@@ -1470,8 +1528,10 @@ static inline void tra_ffic_abi_signature_destroy(
   if (signature == NULL) {
     return;
   }
-  for (index = 0u; index < signature->arg_count; ++index) {
-    tra_ffic_abi_type_destroy(&signature->arg_types[index]);
+  if (signature->arg_types != NULL) {
+    for (index = 0u; index < signature->arg_count; ++index) {
+      tra_ffic_abi_type_destroy(&signature->arg_types[index]);
+    }
   }
   tra_ffic_abi_type_destroy(&signature->return_type);
   free(signature->arg_types);
@@ -1517,11 +1577,6 @@ static inline int tra_ffic_abi_signature_init(
     return 0;
   }
   return 1;
-}
-
-static inline ffi_type *tra_ffic_get_callback_ffi_type(
-    const tra_ffic_type *type) {
-  return tra_ffic_get_ffi_type(type, false);
 }
 
 static inline bool tra_ffic_signature_uses_completion(
@@ -2120,6 +2175,9 @@ typedef struct tra_ffic_marshaled_value {
   tra_ffic_registry_entry **protected_entries;
   size_t protected_entry_count;
   size_t protected_entry_capacity;
+  tra_ffic_registry_entry **retained_adapter_entries;
+  size_t retained_adapter_entry_count;
+  size_t retained_adapter_entry_capacity;
   bool owns_struct_storage;
 } tra_ffic_marshaled_value;
 
@@ -2299,6 +2357,49 @@ static inline int tra_ffic_marshaled_value_add_protected_entry(
   return 1;
 }
 
+static inline int tra_ffic_marshaled_value_add_retained_adapter_entry(
+    tra_ffic_marshaled_value *value,
+    tra_ffic_registry_entry *entry,
+    tra_ffic_error *error) {
+  tra_ffic_registry_entry **resized = NULL;
+  size_t capacity = 0u;
+  size_t index = 0u;
+  if (value == NULL || entry == NULL) {
+    tra_ffic_error_set(error, "Retained adapter input is null");
+    return 0;
+  }
+  for (index = 0u; index < value->retained_adapter_entry_count; ++index) {
+    if (value->retained_adapter_entries[index] == entry) {
+      return 1;
+    }
+  }
+  if (value->retained_adapter_entry_count ==
+      value->retained_adapter_entry_capacity) {
+    capacity = value->retained_adapter_entry_capacity == 0u
+                   ? 2u
+                   : value->retained_adapter_entry_capacity * 2u;
+    if (capacity < value->retained_adapter_entry_capacity ||
+        capacity > SIZE_MAX / sizeof(*resized)) {
+      tra_ffic_error_set(error, "Retained adapter table is too large");
+      return 0;
+    }
+    resized = (tra_ffic_registry_entry **)realloc(
+        value->retained_adapter_entries,
+        capacity * sizeof(*resized));
+    if (resized == NULL) {
+      tra_ffic_error_set(
+          error, "Out of memory growing retained adapter table");
+      return 0;
+    }
+    value->retained_adapter_entries = resized;
+    value->retained_adapter_entry_capacity = capacity;
+  }
+  value->retained_adapter_entries[
+      value->retained_adapter_entry_count] = entry;
+  value->retained_adapter_entry_count += 1u;
+  return 1;
+}
+
 static inline void tra_ffic_marshaled_value_destroy(
     tra_ffic_marshaled_value *value) {
   size_t index = 0u;
@@ -2311,12 +2412,51 @@ static inline void tra_ffic_marshaled_value_destroy(
   for (index = 0u; index < value->owned_string_count; ++index) {
     free(value->owned_strings[index]);
   }
+  free(value->retained_adapter_entries);
   free(value->protected_entries);
   free(value->owned_strings);
   if (value->owns_struct_storage) {
     free(value->storage.struct_value);
   }
   memset(value, 0, sizeof(*value));
+}
+
+static inline void tra_ffic_marshaled_value_commit_retained_adapters(
+    tra_ffic_marshaled_value *value) {
+  size_t index = 0u;
+  if (value == NULL) {
+    return;
+  }
+  for (index = 0u; index < value->retained_adapter_entry_count; ++index) {
+    tra_ffic_registry_entry *entry =
+        value->retained_adapter_entries[index];
+    tra_ffic_mutex_lock(&entry->owner_side->mutex);
+    if (!entry->destroy_scheduled) {
+      entry->ref_count += 1u;
+    }
+    tra_ffic_mutex_unlock(&entry->owner_side->mutex);
+  }
+  free(value->retained_adapter_entries);
+  value->retained_adapter_entries = NULL;
+  value->retained_adapter_entry_count = 0u;
+  value->retained_adapter_entry_capacity = 0u;
+}
+
+static inline int tra_ffic_entry_requires_retained_return(
+    tra_ffic_registry_entry *entry) {
+  int required = 0;
+  if (entry == NULL || entry->owner_side == NULL) {
+    return 0;
+  }
+  /*
+   * A function created only to marshal an active argument has no retained
+   * owner. A synchronous return must promote it before the active arguments
+   * are released, including when the callback returns that same adapter.
+   */
+  tra_ffic_mutex_lock(&entry->owner_side->mutex);
+  required = !entry->destroy_scheduled && entry->ref_count == 0u;
+  tra_ffic_mutex_unlock(&entry->owner_side->mutex);
+  return required;
 }
 
 static inline int tra_ffic_marshaled_value_transfer_protected_entries(
@@ -2376,7 +2516,7 @@ static inline int tra_ffic_store_function_for_expected(
     const tra_ffic_type *expected_type,
     tra_ffic_native_function raw_function,
     tra_ffic_arg_storage *storage,
-    tra_ffic_registry_entry **protected_entry,
+    tra_ffic_marshaled_value *owner,
     bool retained_adapter,
     tra_ffic_error *error);
 
@@ -2437,20 +2577,12 @@ static inline int tra_ffic_copy_struct_fields(
       memcpy(target_bytes + offset, &view, sizeof(view));
     } else if (field_type->kind == TRA_FFIC_TYPE_FUNCTION) {
       tra_ffic_arg_storage function_storage;
-      tra_ffic_registry_entry *protected_entry = NULL;
       tra_ffic_native_function raw_function = NULL;
       memset(&function_storage, 0, sizeof(function_storage));
       memcpy(&raw_function, source_bytes + offset, sizeof(raw_function));
       if (!tra_ffic_store_function_for_expected(
               adapter_owner_side, field_type, raw_function,
-              &function_storage, &protected_entry, retained_adapter,
-              error)) {
-        return 0;
-      }
-      if (protected_entry != NULL &&
-          !tra_ffic_marshaled_value_add_protected_entry(
-              owner, protected_entry, error)) {
-        tra_ffic_entry_release_active(protected_entry);
+              &function_storage, owner, retained_adapter, error)) {
         return 0;
       }
       memcpy(target_bytes + offset, &function_storage.function_value,
@@ -2534,7 +2666,6 @@ tra_ffic_create_function_adapter_entry(
     tra_ffic_side *owner_side,
     tra_ffic_registry_entry *source_entry,
     const tra_ffic_signature *expected_signature,
-    bool retained,
     tra_ffic_error *error) {
   tra_ffic_registry_entry *entry = NULL;
   tra_ffic_function_adapter_state *state = NULL;
@@ -2563,6 +2694,8 @@ tra_ffic_create_function_adapter_entry(
     return NULL;
   }
   entry->owner_side = owner_side;
+  state->source_ref.raw = source_entry->raw;
+  state->source_ref.owner_side = source_entry->owner_side;
   entry->signature = tra_ffic_signature_clone(expected_signature, 0u, error);
   state->source_signature =
       tra_ffic_signature_clone(source_entry->signature, 0u, error);
@@ -2579,13 +2712,10 @@ tra_ffic_create_function_adapter_entry(
     tra_ffic_registry_entry_destroy(entry);
     return NULL;
   }
-  state->source_ref.raw = source_entry->raw;
-  state->source_ref.owner_side = source_entry->owner_side;
   state->source_ref.signature = state->source_signature;
   entry->user_data = state;
   entry->finalize_user_data = tra_ffic_function_adapter_state_destroy;
-  entry->ref_count = retained ? 1u : 0u;
-  entry->active_call_count = retained ? 0u : 1u;
+  entry->active_call_count = 1u;
   native_return_type =
       tra_ffic_signature_uses_completion(entry->signature)
           ? &ffi_type_void
@@ -2643,7 +2773,6 @@ tra_ffic_add_active_or_adapter_by_raw(
     tra_ffic_side *adapter_owner_side,
     tra_ffic_native_function raw,
     const tra_ffic_signature *expected_signature,
-    bool retained_adapter,
     tra_ffic_error *error) {
   tra_ffic_registry_entry *entry = NULL;
   tra_ffic_registry_entry *source_entry = NULL;
@@ -2666,7 +2795,7 @@ tra_ffic_add_active_or_adapter_by_raw(
   }
   return tra_ffic_create_function_adapter_entry(
       adapter_owner_side != NULL ? adapter_owner_side : source_entry->owner_side,
-      source_entry, expected_signature, retained_adapter, error);
+      source_entry, expected_signature, error);
 }
 
 static inline int tra_ffic_store_function_for_expected(
@@ -2674,14 +2803,11 @@ static inline int tra_ffic_store_function_for_expected(
     const tra_ffic_type *expected_type,
     tra_ffic_native_function raw_function,
     tra_ffic_arg_storage *storage,
-    tra_ffic_registry_entry **protected_entry,
+    tra_ffic_marshaled_value *owner,
     bool retained_adapter,
     tra_ffic_error *error) {
   tra_ffic_registry_entry *entry = NULL;
-  if (protected_entry != NULL) {
-    *protected_entry = NULL;
-  }
-  if (expected_type == NULL || storage == NULL ||
+  if (expected_type == NULL || storage == NULL || owner == NULL ||
       expected_type->kind != TRA_FFIC_TYPE_FUNCTION) {
     tra_ffic_error_set(error, "Function storage input is invalid");
     return 0;
@@ -2692,17 +2818,23 @@ static inline int tra_ffic_store_function_for_expected(
   }
   entry = tra_ffic_add_active_or_adapter_by_raw(
       adapter_owner_side, raw_function, expected_type->function_signature,
-      retained_adapter, error);
+      error);
   if (entry == NULL) {
     return 0;
   }
   storage->function_value = entry->raw;
-  if (retained_adapter && entry->raw != raw_function) {
+  if (!tra_ffic_marshaled_value_add_protected_entry(
+          owner, entry, error)) {
     tra_ffic_entry_release_active(entry);
-  } else if (protected_entry != NULL) {
-    *protected_entry = entry;
-  } else {
+    return 0;
+  }
+  if (retained_adapter &&
+      tra_ffic_entry_requires_retained_return(entry) &&
+      !tra_ffic_marshaled_value_add_retained_adapter_entry(
+          owner, entry, error)) {
+    owner->protected_entry_count -= 1u;
     tra_ffic_entry_release_active(entry);
+    return 0;
   }
   return 1;
 }
@@ -2828,19 +2960,12 @@ static inline int tra_ffic_decode_raw_arg_to_storage(
       }
       return 1;
     case TRA_FFIC_TYPE_FUNCTION: {
-      tra_ffic_registry_entry *protected_entry = NULL;
       tra_ffic_native_function raw_function =
           *(tra_ffic_native_function *)raw_arg;
       if (!tra_ffic_store_function_for_expected(
               adapter_owner_side, type, raw_function, storage,
-              &protected_entry, retained_adapter, error)) {
+              value, retained_adapter, error)) {
         tra_ffic_error_set(error, "Unknown function argument");
-        return 0;
-      }
-      if (protected_entry != NULL &&
-          !tra_ffic_marshaled_value_add_protected_entry(
-              value, protected_entry, error)) {
-        tra_ffic_entry_release_active(protected_entry);
         return 0;
       }
       if (raw_value != NULL) {
@@ -2946,16 +3071,9 @@ static inline int tra_ffic_store_value_for_type(
       }
       return 1;
     case TRA_FFIC_TYPE_FUNCTION: {
-      tra_ffic_registry_entry *protected_entry = NULL;
       if (!tra_ffic_store_function_for_expected(
               adapter_owner_side, expected_type, source->as.function_value,
-              storage, &protected_entry, retained_adapter, error)) {
-        return 0;
-      }
-      if (protected_entry != NULL &&
-          !tra_ffic_marshaled_value_add_protected_entry(
-              value, protected_entry, error)) {
-        tra_ffic_entry_release_active(protected_entry);
+              storage, value, retained_adapter, error)) {
         return 0;
       }
       return 1;
@@ -3292,6 +3410,9 @@ static inline void tra_ffic_store_zero_return(
   }
 }
 
+static inline int tra_ffic_type_contains_function(
+    const tra_ffic_type *type);
+
 static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
                                                  void *return_value,
                                                  void **args,
@@ -3301,6 +3422,8 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
   tra_ffic_registry_entry *active_entry = NULL;
   tra_ffic_completion completion = NULL;
   tra_ffic_marshaled_value *marshaled_values = NULL;
+  tra_ffic_marshaled_value raw_callback_return;
+  tra_ffic_marshaled_value marshaled_callback_return;
   void **callback_values = NULL;
   void **callback_arg_list = NULL;
   void *callback_arg_list_value = NULL;
@@ -3312,8 +3435,12 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
   uint32_t native_arg_offset = 0u;
   uint32_t storage_count = 0u;
   bool uses_completion_abi = false;
+  bool marshal_callback_return = false;
   void *callback_return_value = NULL;
   tra_ffic_error local_error;
+  memset(&raw_callback_return, 0, sizeof(raw_callback_return));
+  memset(&marshaled_callback_return, 0,
+         sizeof(marshaled_callback_return));
   tra_ffic_error_clear(&local_error);
   (void)cif;
   if (entry == NULL ||
@@ -3442,15 +3569,54 @@ static inline void tra_ffic_closed_trampoline(ffi_cif *cif,
   } else if (!uses_completion_abi) {
     if (entry->signature->return_type->kind != TRA_FFIC_TYPE_VOID) {
       callback_return_value = return_value;
+      marshal_callback_return = tra_ffic_type_contains_function(
+                                    entry->signature->return_type) != 0;
+      if (marshal_callback_return) {
+        if (entry->signature->return_type->kind ==
+            TRA_FFIC_TYPE_STRUCT) {
+          size_t return_size =
+              entry->abi_signature.return_type.ffi->size;
+          if (return_size < sizeof(ffi_arg)) {
+            return_size = sizeof(ffi_arg);
+          }
+          raw_callback_return.storage.struct_value =
+              calloc(1u, return_size);
+          if (raw_callback_return.storage.struct_value == NULL) {
+            goto cleanup;
+          }
+          raw_callback_return.owns_struct_storage = true;
+        }
+        callback_return_value = tra_ffic_marshaled_value_address(
+            entry->signature->return_type->kind,
+            &raw_callback_return);
+        if (callback_return_value == NULL) {
+          goto cleanup;
+        }
+      }
     }
     ffi_call(&entry->callback_cif, FFI_FN(entry->callback),
              callback_return_value, callback_values);
+    if (marshal_callback_return &&
+        tra_ffic_decode_raw_arg_to_storage(
+            entry->owner_side, entry->signature->return_type,
+            &entry->abi_signature.return_type, callback_return_value,
+            &marshaled_callback_return, NULL, false, true,
+            &local_error) &&
+        tra_ffic_copy_arg_storage_to_address(
+            entry->signature->return_type,
+            &entry->abi_signature.return_type,
+            &marshaled_callback_return.storage, return_value)) {
+      tra_ffic_marshaled_value_commit_retained_adapters(
+          &marshaled_callback_return);
+    }
   } else {
     ffi_call(&entry->callback_cif, FFI_FN(entry->callback), NULL,
              callback_values);
   }
 
 cleanup:
+  tra_ffic_marshaled_value_destroy(&marshaled_callback_return);
+  tra_ffic_marshaled_value_destroy(&raw_callback_return);
   if (marshaled_values != NULL) {
     for (index = 0u; index < entry->signature->arg_count; ++index) {
       tra_ffic_marshaled_value_destroy(
@@ -3463,9 +3629,6 @@ cleanup:
   free(callback_arg_list);
   free(callback_values);
 }
-
-static inline int tra_ffic_type_contains_function(
-    const tra_ffic_type *type);
 
 static inline int tra_ffic_signature_contains_function(
     const tra_ffic_signature *signature) {
@@ -3574,6 +3737,9 @@ static inline int tra_ffic_side_create_function(
     return 0;
   }
   *out_function = NULL;
+  if (!tra_ffic_signature_validate(signature, 0u, error)) {
+    return 0;
+  }
   use_direct_function =
       !force_closure && !passes_closure_state &&
       signature->argument_passing == callback_argument_passing &&
@@ -4151,13 +4317,25 @@ static inline void tra_ffic_side_destroy(tra_ffic_side *side) {
   side->initialized = false;
   tra_ffic_mutex_unlock(&side->mutex);
 
+  /*
+   * Unlink every immediately destroyable entry from the global registry
+   * before running finalizers. An adapter finalizer may release another entry
+   * from this detached list, so destroying while walking it is unsafe.
+   */
+  entry = entries;
+  while (entry != NULL) {
+    entry->ref_count = 0u;
+    if (entry->active_call_count == 0u) {
+      tra_ffic_global_registry_remove(entry);
+    }
+    entry = entry->next;
+  }
+
   entry = entries;
   while (entry != NULL) {
     tra_ffic_registry_entry *next = entry->next;
     entry->next = NULL;
-    entry->ref_count = 0u;
     if (entry->active_call_count == 0u) {
-      tra_ffic_global_registry_remove(entry);
       tra_ffic_registry_entry_schedule_destroy(entry);
     }
     entry = next;
@@ -4420,6 +4598,9 @@ static inline int tra_ffic_call_with_result(
     tra_ffic_error_set(error, "Call input is null");
     return 0;
   }
+  if (!tra_ffic_signature_validate(target_ref->signature, 0u, error)) {
+    return 0;
+  }
   if (target_ref->signature->arg_count != arg_count) {
     tra_ffic_error_set(error, "Invalid argument count");
     return 0;
@@ -4568,6 +4749,7 @@ static inline void tra_ffic_adapter_complete_from_result(
   if (!tra_ffic_store_value_for_type(
           owner_side, return_type, return_abi_type, &result->value,
           &value, false, false, &error)) {
+    tra_ffic_marshaled_value_destroy(&value);
     completion(NULL, error.message);
     return;
   }
@@ -4629,8 +4811,11 @@ static inline void tra_ffic_adapter_retval_callback(
       (void)tra_ffic_result_set_error(&capture->result, error.message);
       return;
     }
-    (void)tra_ffic_result_set_retval_from_storage(
-        &capture->result, capture->return_type, &capture->value.storage);
+    if (!tra_ffic_result_set_retval_from_storage(
+            &capture->result, capture->return_type,
+            &capture->value.storage)) {
+      tra_ffic_marshaled_value_destroy(&capture->value);
+    }
   }
 }
 
@@ -4793,13 +4978,17 @@ static inline void tra_ffic_function_adapter_trampoline(
             entry->owner_side, &state->source_ref, values,
             entry->signature->arg_count, tra_ffic_adapter_retval_callback,
             &capture, &error)) {
+      tra_ffic_marshaled_value_destroy(&capture.value);
       goto cleanup;
     }
     if (capture.called && capture.result.success) {
-      (void)tra_ffic_copy_arg_storage_to_address(
-          entry->signature->return_type,
-          &entry->abi_signature.return_type, &capture.value.storage,
-          return_value);
+      if (tra_ffic_copy_arg_storage_to_address(
+              entry->signature->return_type,
+              &entry->abi_signature.return_type,
+              &capture.value.storage, return_value)) {
+        tra_ffic_marshaled_value_commit_retained_adapters(
+            &capture.value);
+      }
     }
     tra_ffic_marshaled_value_destroy(&capture.value);
   }
@@ -4925,7 +5114,7 @@ static inline int tra_ffic_invoke_success_callback(
       break;
     case TRA_FFIC_TYPE_BUFFER_VIEW:
       storages[1].buffer_view_value = result->value.as.buffer_view_value;
-      arg_types[1] = &tra_ffic_buffer_view_ffi_type;
+      arg_types[1] = return_abi_type->ffi;
       ffi_values[1] = &storages[1].buffer_view_value;
       arg_count = 2u;
       break;
@@ -4999,6 +5188,9 @@ static inline int tra_ffic_call_impl(tra_ffic_side *caller_side,
     tra_ffic_error_set(error, "Call input is null");
     return 0;
   }
+  if (!tra_ffic_signature_validate(target_ref->signature, 0u, error)) {
+    return 0;
+  }
   context = (tra_ffic_success_callback_context *)calloc(1u, sizeof(*context));
   if (context == NULL) {
     tra_ffic_error_set(error, "Out of memory creating callback context");
@@ -5032,6 +5224,9 @@ static inline int tra_ffic_function_ref_from_raw(
   tra_ffic_error_clear(error);
   if (raw == NULL || signature == NULL || out_ref == NULL) {
     tra_ffic_error_set(error, "Function reference input is null");
+    return 0;
+  }
+  if (!tra_ffic_signature_validate(signature, 0u, error)) {
     return 0;
   }
   entry = tra_ffic_global_registry_find(raw, signature);

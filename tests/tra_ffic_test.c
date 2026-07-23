@@ -85,6 +85,30 @@ typedef struct owned_struct_value {
 
 typedef void (*owned_struct_factory_func)(tra_ffic_completion completion);
 
+typedef struct function_struct_inner {
+  args_i32_func adapted;
+  i32_func duplicate;
+} function_struct_inner;
+
+typedef struct function_struct_value {
+  i32_func exact;
+  function_struct_inner nested;
+  i32_func nullable;
+} function_struct_value;
+
+typedef void (*function_struct_func)(tra_ffic_completion completion,
+                                     function_struct_value value);
+
+typedef struct function_view_struct_value {
+  args_i32_func adapted;
+  tra_ffic_buffer_view view;
+} function_view_struct_value;
+
+typedef function_view_struct_value (*retval_function_view_struct_func)(void);
+
+typedef function_view_struct_value
+    (*retval_echo_function_view_struct_func)(args_i32_func adapted);
+
 typedef enum test_drain_mode {
   TEST_DRAIN_INLINE,
   TEST_DRAIN_THREAD,
@@ -138,6 +162,17 @@ typedef struct owned_struct_capture {
   char message[32];
   tra_ffic_buffer_view view;
 } owned_struct_capture;
+
+typedef struct function_struct_capture {
+  int count;
+  int has_error;
+  function_struct_value value;
+} function_struct_capture;
+
+typedef struct function_view_struct_state {
+  i32_func source;
+  bool invalid_view;
+} function_view_struct_state;
 
 typedef struct finalize_counter {
   int count;
@@ -824,6 +859,16 @@ static int test_context_destroy(test_context *context) {
   return passed;
 }
 
+static int reject_scheduled_task(
+    void *schedule_data,
+    tra_ffic_task_function task,
+    void *task_data) {
+  (void)schedule_data;
+  (void)task;
+  (void)task_data;
+  return 0;
+}
+
 static void task_queue_notification_callback(
     tra_ffic_task_queue *queue,
     void *state) {
@@ -1200,6 +1245,58 @@ static void invalid_owned_struct_factory(tra_ffic_completion completion) {
   result.nested.view.data = NULL;
   result.nested.view.size = 1u;
   completion(&result, NULL);
+}
+
+static void echo_function_struct(tra_ffic_completion completion,
+                                 function_struct_value value) {
+  completion(&value, NULL);
+}
+
+static void capture_function_struct_callback(
+    void *user_data,
+    function_struct_value result,
+    const tra_ffic_error *error) {
+  function_struct_capture *capture =
+      (function_struct_capture *)user_data;
+  tra_ffic_error retain_error;
+  capture->count += 1;
+  capture->has_error = error != NULL || result.nullable != NULL;
+  capture->value = result;
+  if (capture->has_error) {
+    return;
+  }
+  if (!tra_ffic_function_retain(result.exact, &retain_error) ||
+      !tra_ffic_function_retain(result.nested.adapted, &retain_error) ||
+      !tra_ffic_function_retain(result.nested.duplicate, &retain_error)) {
+    capture->has_error = 1;
+  }
+}
+
+static function_view_struct_value retval_function_view_struct_factory(
+    void *closure_state) {
+  const function_view_struct_state *state =
+      (const function_view_struct_state *)closure_state;
+  function_view_struct_value result;
+  union {
+    i32_func stack;
+    args_i32_func args;
+  } function_converter;
+  function_converter.stack = state->source;
+  result.adapted = function_converter.args;
+  result.view.data =
+      state->invalid_view ? NULL : (void *)g_owned_struct_buffer;
+  result.view.size =
+      state->invalid_view ? 1u : sizeof(g_owned_struct_buffer);
+  return result;
+}
+
+static function_view_struct_value retval_echo_function_view_struct(
+    args_i32_func adapted) {
+  function_view_struct_value result;
+  result.adapted = adapted;
+  result.view.data = (void *)g_owned_struct_buffer;
+  result.view.size = sizeof(g_owned_struct_buffer);
+  return result;
 }
 
 static void echo_void_function(tra_ffic_completion completion) {
@@ -2559,6 +2656,90 @@ static int run_basic_struct_test(test_drain_mode drain_mode) {
   if (retval_function != NULL) {
     passed = expect_true(tra_ffic_function_release(retval_function, &error),
                          error.message) &&
+             passed;
+  }
+  passed = test_context_drain(&context) && passed;
+  passed = test_context_destroy(&context) && passed;
+  return passed;
+}
+
+static int run_recursive_metadata_validation_test(
+    test_drain_mode drain_mode) {
+  test_context context;
+  tra_ffic_error error;
+  tra_ffic_type malformed_struct_type;
+  tra_ffic_type malformed_struct_args[1];
+  tra_ffic_signature malformed_struct_signature;
+  tra_ffic_signature malformed_arg_table_signature;
+  tra_ffic_function_ref function_ref;
+  tra_ffic_function_ref target_ref;
+  tra_ffic_value arg;
+  typed_capture capture;
+  i32_func valid_function = NULL;
+  i32_func invalid_function = NULL;
+  int passed = 1;
+
+  if (!test_context_init(&context, drain_mode)) {
+    return 0;
+  }
+
+  malformed_struct_type = tra_ffic_type_struct(1u, NULL);
+  malformed_struct_args[0] = malformed_struct_type;
+  malformed_struct_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, malformed_struct_args,
+      &k_type_i32);
+  passed = expect_true(
+               !tra_ffic_side_create_pure_function(
+                   &context.side_b, &malformed_struct_signature,
+                   echo_i32_function, &invalid_function, &error),
+               "malformed structure metadata was accepted during create") &&
+           passed;
+  passed = expect_true(
+               strstr(error.message, "field type table") != NULL,
+               "malformed create metadata error mismatch") &&
+           passed;
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_a, &k_sig_echo_i32,
+                           echo_i32_function, &valid_function, &error),
+                       error.message) &&
+           passed;
+  malformed_arg_table_signature = k_sig_echo_i32;
+  malformed_arg_table_signature.arg_types = NULL;
+  memset(&function_ref, 0, sizeof(function_ref));
+  passed = expect_true(
+               !tra_ffic_function_ref_from_raw(
+                   (tra_ffic_native_function)valid_function,
+                   &malformed_arg_table_signature, &function_ref, &error),
+               "malformed metadata was accepted during raw lookup") &&
+           passed;
+  passed = expect_true(
+               strstr(error.message, "argument type table") != NULL,
+               "malformed raw lookup metadata error mismatch") &&
+           passed;
+
+  memset(&capture, 0, sizeof(capture));
+  memset(&target_ref, 0, sizeof(target_ref));
+  target_ref.raw = (tra_ffic_native_function)valid_function;
+  target_ref.owner_side = &context.side_a;
+  target_ref.signature = &malformed_arg_table_signature;
+  arg = tra_ffic_value_int32(41);
+  passed = expect_true(
+               !tra_ffic_call_with_result(
+                   &context.side_b, &target_ref, &arg, 1u,
+                   capture_result_callback, &capture, &error),
+               "malformed metadata was accepted during call") &&
+           passed;
+  passed = expect_true(
+               strstr(error.message, "argument type table") != NULL &&
+                   capture.count == 0,
+               "malformed call metadata error mismatch") &&
+           passed;
+
+  if (valid_function != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(valid_function, &error),
+                 error.message) &&
              passed;
   }
   passed = test_context_drain(&context) && passed;
@@ -4968,6 +5149,449 @@ static int run_leak_case(const char *case_name,
   return case_passed && tracker_passed;
 }
 
+static int run_struct_function_marshalling_test(
+    test_drain_mode drain_mode) {
+  test_context context;
+  tra_ffic_error error;
+  tra_ffic_type inner_fields[2];
+  tra_ffic_type outer_fields[3];
+  tra_ffic_type outer_args[1];
+  tra_ffic_type view_fields[2];
+  tra_ffic_type view_retval_args[1];
+  tra_ffic_type inner_type;
+  tra_ffic_type outer_type;
+  tra_ffic_type view_type;
+  tra_ffic_signature echo_signature;
+  tra_ffic_signature view_retval_signature;
+  tra_ffic_signature view_echo_retval_signature;
+  function_struct_func echo = NULL;
+  retval_function_view_struct_func valid_factory = NULL;
+  retval_function_view_struct_func invalid_factory = NULL;
+  retval_echo_function_view_struct_func transient_factory = NULL;
+  i32_func add_one = NULL;
+  tra_ffic_completion completion = NULL;
+  function_struct_capture function_capture;
+  typed_capture scalar_capture;
+  function_struct_value input;
+  function_struct_value invalid_input;
+  function_view_struct_value retval_result;
+  function_view_struct_state valid_state;
+  function_view_struct_state invalid_state;
+  tra_ffic_function_ref target_ref;
+  tra_ffic_value call_arg;
+  const void *pointer_args[1];
+  int32_t value = 41;
+  int add_one_released = 0;
+  int transient_return_retained = 0;
+  int passed = 1;
+  union {
+    i32_func stack;
+    args_i32_func args;
+  } function_converter;
+
+  if (!test_context_init(&context, drain_mode)) {
+    return 0;
+  }
+
+  inner_fields[0] = tra_ffic_type_function(&k_sig_args_echo_i32);
+  inner_fields[1] = tra_ffic_type_function(&k_sig_echo_i32);
+  inner_type = tra_ffic_type_struct(2u, inner_fields);
+  outer_fields[0] = tra_ffic_type_function(&k_sig_echo_i32);
+  outer_fields[1] = inner_type;
+  outer_fields[2] = tra_ffic_type_function(&k_sig_echo_i32);
+  outer_type = tra_ffic_type_struct(3u, outer_fields);
+  outer_args[0] = outer_type;
+  echo_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_COMPLETION, 1u, outer_args, &outer_type);
+
+  view_fields[0] = tra_ffic_type_function(&k_sig_args_echo_i32);
+  view_fields[1] = tra_ffic_type_buffer_view();
+  view_type = tra_ffic_type_struct(2u, view_fields);
+  view_retval_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_RETVAL, 0u, NULL, &view_type);
+  view_retval_args[0] =
+      tra_ffic_type_function(&k_sig_args_echo_i32);
+  view_echo_retval_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_RETVAL, 1u, view_retval_args, &view_type);
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_a, &k_sig_echo_i32,
+                           add_one_function, &add_one, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &echo_signature,
+                           echo_function_struct, &echo, &error),
+                       error.message) &&
+           passed;
+  valid_state.source = add_one;
+  valid_state.invalid_view = false;
+  invalid_state.source = add_one;
+  invalid_state.invalid_view = true;
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &view_retval_signature,
+                           retval_function_view_struct_factory, &valid_state,
+                           NULL, &valid_factory, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &context.side_b, &view_retval_signature,
+                           retval_function_view_struct_factory, &invalid_state,
+                           NULL, &invalid_factory, &error),
+                       error.message) &&
+           passed;
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &context.side_b, &view_echo_retval_signature,
+                           retval_echo_function_view_struct,
+                           &transient_factory, &error),
+                       error.message) &&
+           passed;
+
+  function_converter.stack = add_one;
+  memset(&input, 0, sizeof(input));
+  input.exact = add_one;
+  input.nested.adapted = function_converter.args;
+  input.nested.duplicate = add_one;
+  invalid_input = input;
+  invalid_input.nullable = echo_i32_function;
+  memset(&target_ref, 0, sizeof(target_ref));
+  target_ref.raw = (tra_ffic_native_function)echo;
+  target_ref.owner_side = &context.side_b;
+  target_ref.signature = &echo_signature;
+  call_arg = tra_ffic_value_struct(&invalid_input);
+  {
+    const tra_ffic_closure_tracker_snapshot before =
+        tra_ffic_get_closure_tracker_snapshot();
+    memset(&scalar_capture, 0, sizeof(scalar_capture));
+    passed = expect_true(
+                 !tra_ffic_call_with_result(
+                     &context.side_a, &target_ref, &call_arg, 1u,
+                     capture_result_callback, &scalar_capture, &error),
+                 "unknown nested function field was accepted") &&
+             passed;
+    passed = test_context_drain(&context) && passed;
+    passed = expect_closure_tracker_balanced(
+                 &before, "nested function field rollback") &&
+             passed;
+  }
+
+  if (invalid_factory != NULL) {
+    const tra_ffic_closure_tracker_snapshot before =
+        tra_ffic_get_closure_tracker_snapshot();
+    retval_result = invalid_factory();
+    passed = expect_true(
+                 retval_result.adapted == NULL &&
+                     retval_result.view.data == NULL &&
+                     retval_result.view.size == 0u,
+                 "invalid retval structure was not rolled back") &&
+             passed;
+    passed = test_context_drain(&context) && passed;
+    passed = expect_closure_tracker_balanced(
+                 &before, "retained struct adapter rollback") &&
+             passed;
+  }
+
+  if (valid_factory != NULL) {
+    const tra_ffic_closure_tracker_snapshot before =
+        tra_ffic_get_closure_tracker_snapshot();
+    retval_result = valid_factory();
+    passed = expect_true(
+                 retval_result.adapted != NULL &&
+                     (tra_ffic_native_function)retval_result.adapted !=
+                         (tra_ffic_native_function)add_one &&
+                     retval_result.view.data == g_owned_struct_buffer &&
+                     retval_result.view.size ==
+                         sizeof(g_owned_struct_buffer),
+                 "retval structure function adapter was not committed") &&
+             passed;
+    if (retval_result.adapted != NULL &&
+        (tra_ffic_native_function)retval_result.adapted !=
+            (tra_ffic_native_function)add_one) {
+      memset(&scalar_capture, 0, sizeof(scalar_capture));
+      passed = expect_true(tra_ffic_side_create_completion_function(
+                               &context.side_a, &k_type_i32,
+                               capture_i32_callback, &completion,
+                               &scalar_capture, &error),
+                           error.message) &&
+               passed;
+      pointer_args[0] = &value;
+      retval_result.adapted(completion, pointer_args);
+      passed = test_context_drain(&context) && passed;
+      passed = expect_true(
+                   scalar_capture.count == 1 && !scalar_capture.has_error &&
+                       scalar_capture.int32_value == 42,
+                   "retval structure function adapter call failed") &&
+               passed;
+      passed = expect_true(
+                   tra_ffic_function_release(completion, &error),
+                   error.message) &&
+               passed;
+      completion = NULL;
+    }
+    passed = expect_true(
+                 tra_ffic_get_closure_tracker_snapshot().live_count >
+                     before.live_count,
+                 "retval borrowed adapter was not kept by its side") &&
+             passed;
+  }
+
+  if (transient_factory != NULL) {
+    retval_result = transient_factory(function_converter.args);
+    transient_return_retained =
+        retval_result.adapted != NULL &&
+        tra_ffic_function_retain(retval_result.adapted, &error);
+    passed = expect_true(
+                 transient_return_retained,
+                 "transient retval structure adapter was destroyed") &&
+             passed;
+    if (transient_return_retained) {
+      memset(&scalar_capture, 0, sizeof(scalar_capture));
+      passed = expect_true(tra_ffic_side_create_completion_function(
+                               &context.side_a, &k_type_i32,
+                               capture_i32_callback, &completion,
+                               &scalar_capture, &error),
+                           error.message) &&
+               passed;
+      pointer_args[0] = &value;
+      retval_result.adapted(completion, pointer_args);
+      passed = test_context_drain(&context) && passed;
+      passed = expect_true(
+                   scalar_capture.count == 1 && !scalar_capture.has_error &&
+                       scalar_capture.int32_value == 42,
+                   "transient retval structure adapter call failed") &&
+               passed;
+      passed = expect_true(
+                   tra_ffic_function_release(completion, &error),
+                   error.message) &&
+               passed;
+      completion = NULL;
+      passed = expect_true(
+                   tra_ffic_function_release(retval_result.adapted, &error),
+                   error.message) &&
+               passed;
+    }
+  }
+
+  memset(&function_capture, 0, sizeof(function_capture));
+  passed = expect_true(tra_ffic_side_create_completion_function(
+                           &context.side_a, &outer_type,
+                           capture_function_struct_callback, &completion,
+                           &function_capture, &error),
+                       error.message) &&
+           passed;
+  if (echo != NULL && completion != NULL) {
+    echo(completion, input);
+    passed = expect_true(tra_ffic_function_release(add_one, &error),
+                         error.message) &&
+             passed;
+    add_one_released = 1;
+    passed = test_context_drain(&context) && passed;
+    passed = expect_true(
+                 function_capture.count == 1 &&
+                     !function_capture.has_error &&
+                     function_capture.value.exact != NULL &&
+                     function_capture.value.nested.adapted != NULL &&
+                     function_capture.value.nested.duplicate != NULL &&
+                     function_capture.value.nullable == NULL,
+                 "nested structure function completion mismatch") &&
+             passed;
+  }
+  if (completion != NULL) {
+    passed = expect_true(tra_ffic_function_release(completion, &error),
+                         error.message) &&
+             passed;
+    completion = NULL;
+  }
+
+  if (!function_capture.has_error &&
+      function_capture.value.exact != NULL) {
+    memset(&scalar_capture, 0, sizeof(scalar_capture));
+    passed = expect_true(tra_ffic_side_create_completion_function(
+                             &context.side_a, &k_type_i32,
+                             capture_i32_callback, &completion,
+                             &scalar_capture, &error),
+                         error.message) &&
+             passed;
+    function_capture.value.exact(completion, value);
+    passed = test_context_drain(&context) && passed;
+    passed = expect_true(
+                 scalar_capture.count == 1 && !scalar_capture.has_error &&
+                     scalar_capture.int32_value == 42,
+                 "retained exact structure function failed") &&
+             passed;
+    passed = expect_true(tra_ffic_function_release(completion, &error),
+                         error.message) &&
+             passed;
+    completion = NULL;
+  }
+  if (!function_capture.has_error &&
+      function_capture.value.nested.duplicate != NULL) {
+    memset(&scalar_capture, 0, sizeof(scalar_capture));
+    passed = expect_true(tra_ffic_side_create_completion_function(
+                             &context.side_a, &k_type_i32,
+                             capture_i32_callback, &completion,
+                             &scalar_capture, &error),
+                         error.message) &&
+             passed;
+    function_capture.value.nested.duplicate(completion, value);
+    passed = test_context_drain(&context) && passed;
+    passed = expect_true(
+                 scalar_capture.count == 1 && !scalar_capture.has_error &&
+                     scalar_capture.int32_value == 42,
+                 "retained duplicate structure function failed") &&
+             passed;
+    passed = expect_true(tra_ffic_function_release(completion, &error),
+                         error.message) &&
+             passed;
+    completion = NULL;
+  }
+  if (!function_capture.has_error &&
+      function_capture.value.nested.adapted != NULL) {
+    memset(&scalar_capture, 0, sizeof(scalar_capture));
+    passed = expect_true(tra_ffic_side_create_completion_function(
+                             &context.side_a, &k_type_i32,
+                             capture_i32_callback, &completion,
+                             &scalar_capture, &error),
+                         error.message) &&
+             passed;
+    pointer_args[0] = &value;
+    function_capture.value.nested.adapted(completion, pointer_args);
+    passed = test_context_drain(&context) && passed;
+    passed = expect_true(
+                 scalar_capture.count == 1 && !scalar_capture.has_error &&
+                     scalar_capture.int32_value == 42,
+                 "retained adapted structure function failed") &&
+             passed;
+    passed = expect_true(tra_ffic_function_release(completion, &error),
+                         error.message) &&
+             passed;
+    completion = NULL;
+  }
+
+  if (function_capture.value.exact != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(function_capture.value.exact,
+                                            &error),
+                 error.message) &&
+             passed;
+  }
+  if (function_capture.value.nested.duplicate != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(
+                     function_capture.value.nested.duplicate, &error),
+                 error.message) &&
+             passed;
+  }
+  if (function_capture.value.nested.adapted != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(
+                     function_capture.value.nested.adapted, &error),
+                 error.message) &&
+             passed;
+  }
+  if (invalid_factory != NULL) {
+    passed = expect_true(tra_ffic_function_release(invalid_factory, &error),
+                         error.message) &&
+             passed;
+  }
+  if (valid_factory != NULL) {
+    passed = expect_true(tra_ffic_function_release(valid_factory, &error),
+                         error.message) &&
+             passed;
+  }
+  if (transient_factory != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(transient_factory, &error),
+                 error.message) &&
+             passed;
+  }
+  if (echo != NULL) {
+    passed = expect_true(tra_ffic_function_release(echo, &error),
+                         error.message) &&
+             passed;
+  }
+  if (!add_one_released && add_one != NULL) {
+    passed = expect_true(tra_ffic_function_release(add_one, &error),
+                         error.message) &&
+             passed;
+  }
+  passed = test_context_drain(&context) && passed;
+  passed = test_context_destroy(&context) && passed;
+  return passed;
+}
+
+static int run_struct_adapter_immediate_destroy_test(
+    test_drain_mode drain_mode) {
+  tra_ffic_side side_a;
+  tra_ffic_side side_b;
+  tra_ffic_error error;
+  tra_ffic_type view_fields[2];
+  tra_ffic_type view_type;
+  tra_ffic_signature view_retval_signature;
+  function_view_struct_state state;
+  function_view_struct_value result;
+  retval_function_view_struct_func factory = NULL;
+  i32_func source = NULL;
+  const tra_ffic_closure_tracker_snapshot before =
+      tra_ffic_get_closure_tracker_snapshot();
+  int passed = 1;
+  (void)drain_mode;
+
+  if (!tra_ffic_side_init_pair(
+          &side_a, &side_b, reject_scheduled_task, NULL, &error)) {
+    fprintf(stderr, "%s\n", error.message);
+    return 0;
+  }
+
+  view_fields[0] = tra_ffic_type_function(&k_sig_args_echo_i32);
+  view_fields[1] = tra_ffic_type_buffer_view();
+  view_type = tra_ffic_type_struct(2u, view_fields);
+  view_retval_signature = tra_ffic_signature_stack(
+      TRA_FFIC_SIGNATURE_ABI_RETVAL, 0u, NULL, &view_type);
+
+  passed = expect_true(tra_ffic_side_create_pure_function(
+                           &side_b, &k_sig_echo_i32, add_one_function,
+                           &source, &error),
+                       error.message) &&
+           passed;
+  state.source = source;
+  state.invalid_view = false;
+  passed = expect_true(tra_ffic_side_create_closure(
+                           &side_b, &view_retval_signature,
+                           retval_function_view_struct_factory, &state, NULL,
+                           &factory, &error),
+                       error.message) &&
+           passed;
+  if (factory != NULL) {
+    result = factory();
+    passed = expect_true(
+                 result.adapted != NULL &&
+                     (tra_ffic_native_function)result.adapted !=
+                         (tra_ffic_native_function)source,
+                 "same-side retained structure adapter was not created") &&
+             passed;
+    passed = expect_true(
+                 tra_ffic_function_release(factory, &error),
+                 error.message) &&
+             passed;
+    factory = NULL;
+  }
+  if (source != NULL) {
+    passed = expect_true(
+                 tra_ffic_function_release(source, &error),
+                 error.message) &&
+             passed;
+    source = NULL;
+  }
+
+  tra_ffic_side_destroy(&side_a);
+  tra_ffic_side_destroy(&side_b);
+  passed = expect_closure_tracker_balanced(
+               &before, "same-side immediate adapter destruction") &&
+           passed;
+  return passed;
+}
+
 static int run_leak_normal_operation_case(test_drain_mode drain_mode) {
   test_context context;
   tra_ffic_error error;
@@ -5563,6 +6187,7 @@ static int run_regression_test(test_drain_mode drain_mode) {
   passed = passed && run_readme_minimum_test(drain_mode);
   passed = passed && run_primitive_test(drain_mode);
   passed = passed && run_basic_struct_test(drain_mode);
+  passed = passed && run_recursive_metadata_validation_test(drain_mode);
   passed = passed && run_struct_route_and_ownership_test(drain_mode);
   passed = passed && run_closure_scalar_test(drain_mode);
   passed = passed && run_structured_scalar_call_test(drain_mode);
@@ -5573,6 +6198,8 @@ static int run_regression_test(test_drain_mode drain_mode) {
   passed = passed && run_async_completion_test(drain_mode);
   passed = passed && run_pointer_list_argument_passing_test(drain_mode);
   passed = passed && run_function_marshalling_test(drain_mode);
+  passed = passed && run_struct_function_marshalling_test(drain_mode);
+  passed = passed && run_struct_adapter_immediate_destroy_test(drain_mode);
   passed = passed && run_function_identity_test(drain_mode);
   passed = passed && run_three_level_function_signature_test(drain_mode);
   passed = passed && run_function_argument_error_test(drain_mode);
