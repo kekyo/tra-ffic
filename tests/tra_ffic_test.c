@@ -4557,6 +4557,88 @@ static int run_pointer_list_argument_passing_test(
   return passed;
 }
 
+static int run_adapter_lookup_lifetime_test(
+    test_drain_mode drain_mode) {
+  test_context context;
+  tra_ffic_error error;
+  tra_ffic_registry_entry *source_entry = NULL;
+  tra_ffic_registry_entry *adapter_entry = NULL;
+  tra_ffic_completion completion = NULL;
+  typed_capture capture;
+  int32_t value = 41;
+  const void *args[1];
+  union {
+    i32_func typed;
+    tra_ffic_native_function native;
+  } source;
+  union {
+    args_i32_func typed;
+    tra_ffic_native_function native;
+  } adapter;
+  int passed = 1;
+  if (!test_context_init(&context, drain_mode)) {
+    return 0;
+  }
+  memset(&source, 0, sizeof(source));
+  memset(&adapter, 0, sizeof(adapter));
+  memset(&capture, 0, sizeof(capture));
+  args[0] = &value;
+
+  passed = expect_true(
+               tra_ffic_side_create_pure_function(
+                   &context.side_b, &k_sig_echo_i32, add_one_function,
+                   &source.typed, &error),
+               error.message) &&
+           passed;
+  source_entry = tra_ffic_global_registry_add_active_logical(
+      source.native, &k_sig_args_echo_i32);
+  passed = expect_true(source_entry != NULL,
+                       "logical adapter source lookup failed") &&
+           passed;
+  if (source.typed != NULL) {
+    passed = expect_true(tra_ffic_function_release(source.typed, &error),
+                         error.message) &&
+             passed;
+    source.typed = NULL;
+  }
+  if (source_entry != NULL) {
+    adapter_entry = tra_ffic_create_function_adapter_entry(
+        &context.side_a, source_entry, &k_sig_args_echo_i32, &error);
+    passed = expect_true(
+                 adapter_entry != NULL,
+                 "adapter lookup did not protect the source lifetime") &&
+             passed;
+    tra_ffic_entry_release_active(source_entry);
+  }
+
+  if (adapter_entry != NULL) {
+    adapter.native = adapter_entry->raw;
+    passed = expect_true(
+                 tra_ffic_side_create_completion_function(
+                     &context.side_a, &k_type_i32, capture_i32_callback,
+                     &completion, &capture, &error),
+                 error.message) &&
+             passed;
+    if (completion != NULL) {
+      adapter.typed(completion, args);
+      passed = test_context_drain(&context) && passed;
+      passed = expect_true(capture.count == 1 && !capture.has_error &&
+                               capture.int32_value == 42,
+                           "protected adapter source call failed") &&
+               passed;
+      passed = expect_true(
+                   tra_ffic_function_release(completion, &error),
+                   error.message) &&
+               passed;
+      completion = NULL;
+    }
+    tra_ffic_entry_release_active(adapter_entry);
+  }
+  passed = test_context_drain(&context) && passed;
+  passed = test_context_destroy(&context) && passed;
+  return passed;
+}
+
 static int run_function_marshalling_test(test_drain_mode drain_mode) {
   test_context context;
   tra_ffic_error error;
@@ -6197,6 +6279,7 @@ static int run_regression_test(test_drain_mode drain_mode) {
   passed = passed && run_completion_behavior_test(drain_mode);
   passed = passed && run_async_completion_test(drain_mode);
   passed = passed && run_pointer_list_argument_passing_test(drain_mode);
+  passed = passed && run_adapter_lookup_lifetime_test(drain_mode);
   passed = passed && run_function_marshalling_test(drain_mode);
   passed = passed && run_struct_function_marshalling_test(drain_mode);
   passed = passed && run_struct_adapter_immediate_destroy_test(drain_mode);
