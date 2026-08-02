@@ -1928,10 +1928,12 @@ static inline tra_ffic_registry_entry *tra_ffic_global_registry_find(
 }
 
 static inline tra_ffic_registry_entry *
-tra_ffic_global_registry_find_logical(
+tra_ffic_global_registry_add_active_logical(
     tra_ffic_native_function raw,
     const tra_ffic_signature *signature) {
   tra_ffic_registry_entry *entry = NULL;
+  tra_ffic_registry_entry *cursor = NULL;
+  tra_ffic_side *side = NULL;
   if (raw == NULL || signature == NULL) {
     return NULL;
   }
@@ -1941,8 +1943,33 @@ tra_ffic_global_registry_find_logical(
     if (tra_ffic_function_key(entry->raw) == tra_ffic_function_key(raw) &&
         !entry->destroy_scheduled &&
         tra_ffic_signature_logically_equals(entry->signature, signature)) {
+      side = entry->owner_side;
       tra_ffic_static_mutex_unlock(&tra_ffic_global_registry_mutex);
-      return entry;
+      if (side == NULL) {
+        return NULL;
+      }
+
+      /* Revalidate the entry while holding the locks used to remove it. The
+       * first lookup cannot safely dereference entry after dropping the global
+       * lock, because a final release may have removed and freed it. */
+      tra_ffic_mutex_lock(&side->mutex);
+      tra_ffic_static_mutex_lock(&tra_ffic_global_registry_mutex);
+      cursor = tra_ffic_global_registry_entries;
+      while (cursor != NULL && cursor != entry) {
+        cursor = cursor->global_next;
+      }
+      if (cursor == entry && entry->owner_side == side &&
+          !entry->destroy_scheduled &&
+          tra_ffic_function_key(entry->raw) == tra_ffic_function_key(raw) &&
+          tra_ffic_signature_logically_equals(entry->signature, signature)) {
+        entry->active_call_count += 1u;
+        tra_ffic_static_mutex_unlock(&tra_ffic_global_registry_mutex);
+        tra_ffic_mutex_unlock(&side->mutex);
+        return entry;
+      }
+      tra_ffic_static_mutex_unlock(&tra_ffic_global_registry_mutex);
+      tra_ffic_mutex_unlock(&side->mutex);
+      return NULL;
     }
     entry = entry->global_next;
   }
@@ -2796,26 +2823,26 @@ tra_ffic_add_active_or_adapter_by_raw(
     tra_ffic_error *error) {
   tra_ffic_registry_entry *entry = NULL;
   tra_ffic_registry_entry *source_entry = NULL;
+  tra_ffic_side *owner_side = NULL;
   if (raw == NULL) {
     return NULL;
   }
-  entry = tra_ffic_entry_add_active_by_raw(raw, expected_signature, NULL);
-  if (entry != NULL) {
-    return entry;
-  }
   source_entry =
-      tra_ffic_global_registry_find_logical(raw, expected_signature);
+      tra_ffic_global_registry_add_active_logical(raw, expected_signature);
   if (source_entry == NULL) {
     tra_ffic_error_set(error, "Function reference is unknown");
     return NULL;
   }
   if (tra_ffic_signature_equals(source_entry->signature,
                                 expected_signature)) {
-    return tra_ffic_entry_add_active_entry(source_entry, error);
+    return source_entry;
   }
-  return tra_ffic_create_function_adapter_entry(
-      adapter_owner_side != NULL ? adapter_owner_side : source_entry->owner_side,
-      source_entry, expected_signature, error);
+  owner_side = adapter_owner_side != NULL ? adapter_owner_side
+                                          : source_entry->owner_side;
+  entry = tra_ffic_create_function_adapter_entry(
+      owner_side, source_entry, expected_signature, error);
+  tra_ffic_entry_release_active(source_entry);
+  return entry;
 }
 
 static inline int tra_ffic_store_function_for_expected(
