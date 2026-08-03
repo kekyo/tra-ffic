@@ -2,6 +2,9 @@ CC = gcc
 PKG_CONFIG ?= pkg-config
 VALGRIND ?= valgrind
 WINE ?= wine
+WINEBOOT ?= wineboot
+WINE_ARCH ?= win64
+WINE_DEBUG ?= -all
 CURL ?= curl
 TAR ?= tar
 WIN32_HOST ?= x86_64-w64-mingw32
@@ -20,6 +23,8 @@ LIBFFI_PACKAGE := libffi-$(LIBFFI_VERSION).tar.gz
 LIBFFI_URL := https://github.com/libffi/libffi/releases/download/v$(LIBFFI_VERSION)/$(LIBFFI_PACKAGE)
 
 BUILD_DIR := .build
+WINE_PREFIX ?= $(abspath $(BUILD_DIR)/wine-prefix)
+WINE_PREFIX_STAMP := $(WINE_PREFIX)/.tra-ffic-ready
 DEPS_DIR := $(BUILD_DIR)/deps
 LIBFFI_ARCHIVE := $(DEPS_DIR)/$(LIBFFI_PACKAGE)
 WIN32_LIBFFI_SOURCE_DIR := $(DEPS_DIR)/src/libffi-$(LIBFFI_VERSION)-win32
@@ -51,10 +56,23 @@ test-valgrind: $(TEST_BIN)
 test-asan: $(TEST_ASAN_BIN)
 	ASAN_OPTIONS="$(ASAN_OPTIONS)" $(TEST_ASAN_BIN)
 
-test-win32: $(TEST_WIN32_BIN)
-	$(WINE) $(TEST_WIN32_BIN)
+test-win32: $(TEST_WIN32_BIN) $(WINE_PREFIX_STAMP)
+	DISPLAY= WINEARCH="$(WINE_ARCH)" WINEDEBUG="$(WINE_DEBUG)" WINEPREFIX="$(WINE_PREFIX)" $(WINE) $(TEST_WIN32_BIN)
 
 libffi-win32: $(WIN32_LIBFFI_STAMP)
+
+# Initialize the isolated prefix separately so successful setup stays out of test logs.
+$(WINE_PREFIX_STAMP): | $(BUILD_DIR)
+	@wineboot_log="$(BUILD_DIR)/wineboot.log"; \
+	if DISPLAY= WINEARCH="$(WINE_ARCH)" WINEDEBUG="$(WINE_DEBUG)" WINEPREFIX="$(WINE_PREFIX)" $(WINEBOOT) --init >"$$wineboot_log" 2>&1; then \
+		rm -f "$$wineboot_log"; \
+		touch "$@"; \
+	else \
+		status=$$?; \
+		cat "$$wineboot_log" >&2; \
+		rm -f "$$wineboot_log"; \
+		exit $$status; \
+	fi
 
 $(TEST_BIN): tests/tra_ffic_test.c include/tra_ffic.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(LIBFFI_CFLAGS) -Iinclude $< -o $@ $(LIBFFI_LIBS) -pthread -lm
