@@ -5,8 +5,6 @@ WINE ?= wine
 WINEBOOT ?= wineboot
 WINE_ARCH ?= win64
 WINE_DEBUG ?= -all
-CURL ?= curl
-TAR ?= tar
 WIN32_HOST ?= x86_64-w64-mingw32
 WIN32_CC ?= $(WIN32_HOST)-gcc
 
@@ -18,19 +16,17 @@ LIBFFI_CFLAGS := $(shell $(PKG_CONFIG) --cflags libffi)
 LIBFFI_LIBS := $(shell $(PKG_CONFIG) --libs libffi)
 WIN32_CFLAGS ?= -O3 -g -std=c99 -Wall -Wextra -Werror -DTRA_FFIC_TRACK_CLOSURES -DTRA_FFIC_IN_WIN32=1 -DTRA_FFIC_IN_POSIX=0 -D_WIN32_WINNT=0x0600
 WIN32_LDFLAGS ?= -static-libgcc
-LIBFFI_VERSION ?= 3.4.6
-LIBFFI_PACKAGE := libffi-$(LIBFFI_VERSION).tar.gz
-LIBFFI_URL := https://github.com/libffi/libffi/releases/download/v$(LIBFFI_VERSION)/$(LIBFFI_PACKAGE)
 
 BUILD_DIR := .build
 WINE_PREFIX ?= $(abspath $(BUILD_DIR)/wine-prefix)
 WINE_PREFIX_STAMP := $(WINE_PREFIX)/.tra-ffic-ready
 DEPS_DIR := $(BUILD_DIR)/deps
-LIBFFI_ARCHIVE := $(DEPS_DIR)/$(LIBFFI_PACKAGE)
-WIN32_LIBFFI_SOURCE_DIR := $(DEPS_DIR)/src/libffi-$(LIBFFI_VERSION)-win32
+WIN32_LIBFFI_SOURCE_DIR := deps/libffi-win32
+WIN32_LIBFFI_BUILD_DIR := $(DEPS_DIR)/src/libffi-win32
 WIN32_LIBFFI_PREFIX := $(DEPS_DIR)/libffi-win32
 WIN32_LIBFFI_PREFIX_ABS := $(abspath $(WIN32_LIBFFI_PREFIX))
-WIN32_LIBFFI_STAMP := $(WIN32_LIBFFI_PREFIX)/.built-$(LIBFFI_VERSION)
+WIN32_LIBFFI_REVISION := $(shell git -C $(WIN32_LIBFFI_SOURCE_DIR) rev-parse --short=12 HEAD 2>/dev/null || printf uninitialized)
+WIN32_LIBFFI_STAMP := $(WIN32_LIBFFI_PREFIX)/.built-$(WIN32_LIBFFI_REVISION)
 WIN32_LIBFFI_CFLAGS := -I$(WIN32_LIBFFI_PREFIX)/include
 WIN32_LIBFFI_LIBS := $(WIN32_LIBFFI_PREFIX)/lib/libffi.a
 TEST_BIN := $(BUILD_DIR)/tra_ffic_test
@@ -84,20 +80,21 @@ $(TEST_WIN32_BIN): tests/tra_ffic_test.c include/tra_ffic.h $(WIN32_LIBFFI_STAMP
 	$(WIN32_CC) $(WIN32_CFLAGS) $(WIN32_LIBFFI_CFLAGS) -Iinclude $< -o $@ $(WIN32_LIBFFI_LIBS) $(WIN32_LDFLAGS) -lm
 
 $(WIN32_LIBFFI_STAMP):
+	test -f "$(WIN32_LIBFFI_SOURCE_DIR)/configure.ac" || { \
+		echo "libffi submodule is not initialized; run: git submodule update --init deps/libffi-win32" >&2; \
+		exit 1; \
+	}
 	command -v $(WIN32_CC) >/dev/null
-	command -v $(CURL) >/dev/null
-	command -v $(TAR) >/dev/null
+	command -v autoreconf >/dev/null
 	command -v make >/dev/null
-	mkdir -p $(DEPS_DIR) $(DEPS_DIR)/src
-	if [ ! -f "$(LIBFFI_ARCHIVE)" ]; then \
-		$(CURL) -fL -o "$(LIBFFI_ARCHIVE)" "$(LIBFFI_URL)"; \
-	fi
-	rm -rf "$(WIN32_LIBFFI_SOURCE_DIR)" "$(WIN32_LIBFFI_PREFIX)"
-	mkdir -p "$(WIN32_LIBFFI_SOURCE_DIR)"
-	$(TAR) -xzf "$(LIBFFI_ARCHIVE)" -C "$(WIN32_LIBFFI_SOURCE_DIR)" --strip-components=1
-	cd "$(WIN32_LIBFFI_SOURCE_DIR)" && ./configure --host="$(WIN32_HOST)" --prefix="$(WIN32_LIBFFI_PREFIX_ABS)" --disable-shared --enable-static --disable-docs
-	$(MAKE) -C "$(WIN32_LIBFFI_SOURCE_DIR)" -j"$$(nproc)"
-	$(MAKE) -C "$(WIN32_LIBFFI_SOURCE_DIR)" install
+	rm -rf "$(WIN32_LIBFFI_BUILD_DIR)" "$(WIN32_LIBFFI_PREFIX)"
+	mkdir -p "$(WIN32_LIBFFI_BUILD_DIR)"
+	cp -R "$(WIN32_LIBFFI_SOURCE_DIR)/." "$(WIN32_LIBFFI_BUILD_DIR)"
+	rm -f "$(WIN32_LIBFFI_BUILD_DIR)/.git"
+	cd "$(WIN32_LIBFFI_BUILD_DIR)" && ./autogen.sh
+	cd "$(WIN32_LIBFFI_BUILD_DIR)" && ./configure --host="$(WIN32_HOST)" --prefix="$(WIN32_LIBFFI_PREFIX_ABS)" --disable-shared --enable-static --disable-docs
+	$(MAKE) -C "$(WIN32_LIBFFI_BUILD_DIR)" -j"$$(nproc)"
+	$(MAKE) -C "$(WIN32_LIBFFI_BUILD_DIR)" install
 	touch "$(WIN32_LIBFFI_STAMP)"
 
 $(BUILD_DIR):

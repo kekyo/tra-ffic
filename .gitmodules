@@ -1,0 +1,3 @@
+[submodule "deps/libffi-win32"]
+	path = deps/libffi-win32
+	url = https://github.com/libffi/libffi.git
