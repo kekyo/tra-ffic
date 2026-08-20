@@ -112,7 +112,8 @@ For example, if it is used as a cross-call infrastructure in mechanically genera
 
 - POSIX
 - Win32
-- libffi
+- Android 7.0 (API 24) or later (`x86_64` and `arm64-v8a`, 4 KiB and 16 KiB page sizes)
+- libffi 3.8.0
 
 ---
 
@@ -125,14 +126,16 @@ sudo apt update
 sudo apt install -y libffi-dev
 ```
 
-On Win32 environments, you need to build libffi from the source included in this repository as a git submodule.
+On Win32 and Android environments, you need to build libffi from the source included in this repository as a git submodule.
 Clone this repository with `--recurse-submodules`, or initialize it in an existing checkout:
 
 ```sh
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 ```
 
 The [Makefile](./Makefile) may be useful as a reference for the build process.
+For Android, build tra-ffic and libffi as C99 position-independent code for each target ABI, and link libffi statically into the native library.
+Native libraries and their APK entries must be aligned for 16 KiB page-size devices; the provided Makefile uses a 16 KiB maximum ELF page size and ZIP alignment for this purpose.
 
 Once libffi is ready, copy [`include/tra_ffic.h`](./include/tra_ffic.h) into your project and include it:
 
@@ -721,12 +724,12 @@ Note: Although this is not shown in the code, `tra_ffic_function_release()` must
 
 ## Building and Testing
 
-Run the POSIX and Win32 tests together:
+Run the POSIX and Win32 host tests together:
 
 ```bash
 sudo apt update
 sudo apt install -y autoconf automake libffi-dev libltdl-dev libtool pkg-config
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 make test-all
 ```
 
@@ -737,7 +740,7 @@ make test
 ```
 
 The development tests build 64-bit Windows binaries under the Win32 target name and run them with Wine.
-libffi for the Win32 build is built locally for mingw-w64 from `deps/libffi-win32`:
+libffi for the Win32 build is built locally for mingw-w64 from `deps/libffi`:
 
 ```sh
 make test-win32
@@ -745,6 +748,27 @@ make test-win32
 
 `x86_64-w64-mingw32-gcc` builds the Win32 test binaries, and `wine` runs them.
 The Win32 tests do not use Valgrind or ASAN.
+
+The Android build requires JDK, Android NDK 29.0.14206865, SDK Platform 37.0, and Build Tools 36.0.0.
+Build and validate APKs for both supported ABIs, including 16 KiB ELF and ZIP alignment:
+
+```sh
+export ANDROID_SDK_ROOT=/path/to/android-sdk
+export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+make -j test-android
+```
+
+To run the same complete regression suite on an emulator or attached device, specify its ABI, API level, page size, and optionally its adb serial:
+
+```sh
+make -j test-android-runtime \
+  ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
+  ANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" \
+  ANDROID_RUNTIME_ABI=arm64-v8a \
+  ANDROID_EXPECTED_API=35 \
+  ANDROID_EXPECTED_PAGE_SIZE=16384 \
+  ADB_SERIAL=device-serial
+```
 
 ## Notes
 

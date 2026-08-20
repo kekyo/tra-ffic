@@ -110,7 +110,8 @@ int main(void) {
 
 - POSIX
 - Win32
-- libffi
+- Android 7.0（API 24）以降（`x86_64`、`arm64-v8a`、4 KiB／16 KiBページサイズ）
+- libffi 3.8.0
 
 ---
 
@@ -123,14 +124,16 @@ sudo apt update
 sudo apt install -y libffi-dev
 ```
 
-Win32環境では、このリポジトリにgit submoduleとして含まれるlibffiのソースをビルドする必要があります。
+Win32環境とAndroid環境では、このリポジトリにgit submoduleとして含まれるlibffiのソースをビルドする必要があります。
 このリポジトリを `--recurse-submodules` 付きでcloneするか、既存のcheckoutでsubmoduleを初期化して下さい:
 
 ```sh
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 ```
 
 ビルド方法については [Makefile](./Makefile) を参考にすると良いでしょう。
+Androidでは、tra-fficとlibffiをターゲットABIごとのC99位置独立コードとしてビルドし、libffiをネイティブライブラリへ静的リンクして下さい。
+ネイティブライブラリとAPK内のエントリは16 KiBページサイズ端末向けのアラインメントが必要です。このため、付属MakefileではELFの最大ページサイズとZIPアラインメントを16 KiBに設定しています。
 
 libffiが準備できれば、あとはあなたのプロジェクトに [`include/tra_ffic.h`](./include/tra_ffic.h) をコピーしてインクルードして下さい:
 
@@ -721,12 +724,12 @@ int main(void) {
 
 ## ビルドとテスト
 
-POSIX向けテストとWin32向けテストをまとめて実行します:
+POSIX向けテストとWin32向けホストテストをまとめて実行します:
 
 ```bash
 sudo apt update
 sudo apt install -y autoconf automake libffi-dev libltdl-dev libtool pkg-config
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 make test-all
 ```
 
@@ -737,7 +740,7 @@ make test
 ```
 
 開発用のテストでは、Win32ターゲット名で64ビットWindowsバイナリをビルドし、Wineで実行します。
-Win32ビルド用のlibffiは `deps/libffi-win32` からmingw-w64向けに自前ビルドされます:
+Win32ビルド用のlibffiは `deps/libffi` からmingw-w64向けに自前ビルドされます:
 
 ```sh
 make test-win32
@@ -745,6 +748,27 @@ make test-win32
 
 `x86_64-w64-mingw32-gcc` でWin32テストバイナリをビルドし、`wine` で実行します。
 Win32テストではvalgrindとASANは使用しません。
+
+Androidビルドには、JDK、Android NDK 29.0.14206865、SDK Platform 37.0、Build Tools 36.0.0が必要です。
+対応する両ABIのAPKをビルドし、16 KiBのELF／ZIPアラインメントを含めて検証します:
+
+```sh
+export ANDROID_SDK_ROOT=/path/to/android-sdk
+export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+make -j test-android
+```
+
+エミュレーターまたは接続した実機で同じ全回帰テストを実行する場合は、ABI、APIレベル、ページサイズ、必要に応じてadb serialを指定します:
+
+```sh
+make -j test-android-runtime \
+  ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
+  ANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" \
+  ANDROID_RUNTIME_ABI=arm64-v8a \
+  ANDROID_EXPECTED_API=35 \
+  ANDROID_EXPECTED_PAGE_SIZE=16384 \
+  ADB_SERIAL=device-serial
+```
 
 ## 備考
 
