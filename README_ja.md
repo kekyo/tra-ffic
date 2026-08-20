@@ -123,7 +123,13 @@ sudo apt update
 sudo apt install -y libffi-dev
 ```
 
-Win32環境では、[libffiリポジトリ](https://github.com/libffi/libffi/) からコードを取得してビルドする必要があります。
+Win32環境では、このリポジトリにgit submoduleとして含まれるlibffiのソースをビルドする必要があります。
+このリポジトリを `--recurse-submodules` 付きでcloneするか、既存のcheckoutでsubmoduleを初期化して下さい:
+
+```sh
+git submodule update --init deps/libffi-win32
+```
+
 ビルド方法については [Makefile](./Makefile) を参考にすると良いでしょう。
 
 libffiが準備できれば、あとはあなたのプロジェクトに [`include/tra_ffic.h`](./include/tra_ffic.h) をコピーしてインクルードして下さい:
@@ -719,7 +725,8 @@ POSIX向けテストとWin32向けテストをまとめて実行します:
 
 ```bash
 sudo apt update
-sudo apt install -y libffi-dev pkg-config
+sudo apt install -y autoconf automake libffi-dev libltdl-dev libtool pkg-config
+git submodule update --init deps/libffi-win32
 make test-all
 ```
 
@@ -730,7 +737,7 @@ make test
 ```
 
 開発用のテストでは、Win32ターゲット名で64ビットWindowsバイナリをビルドし、Wineで実行します。
-Win32ビルド用のlibffiはmingw-w64向けに自前ビルドされます:
+Win32ビルド用のlibffiは `deps/libffi-win32` からmingw-w64向けに自前ビルドされます:
 
 ```sh
 make test-win32
