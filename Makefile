@@ -21,12 +21,12 @@ BUILD_DIR := .build
 WINE_PREFIX ?= $(abspath $(BUILD_DIR)/wine-prefix)
 WINE_PREFIX_STAMP := $(WINE_PREFIX)/.tra-ffic-ready
 DEPS_DIR := $(BUILD_DIR)/deps
-WIN32_LIBFFI_SOURCE_DIR := deps/libffi-win32
+LIBFFI_SOURCE_DIR := deps/libffi
 WIN32_LIBFFI_BUILD_DIR := $(DEPS_DIR)/src/libffi-win32
 WIN32_LIBFFI_PREFIX := $(DEPS_DIR)/libffi-win32
 WIN32_LIBFFI_PREFIX_ABS := $(abspath $(WIN32_LIBFFI_PREFIX))
-WIN32_LIBFFI_REVISION := $(shell git -C $(WIN32_LIBFFI_SOURCE_DIR) rev-parse --short=12 HEAD 2>/dev/null || printf uninitialized)
-WIN32_LIBFFI_STAMP := $(WIN32_LIBFFI_PREFIX)/.built-$(WIN32_LIBFFI_REVISION)
+LIBFFI_REVISION := $(shell git -C $(LIBFFI_SOURCE_DIR) rev-parse --short=12 HEAD 2>/dev/null || printf uninitialized)
+WIN32_LIBFFI_STAMP := $(WIN32_LIBFFI_PREFIX)/.built-$(LIBFFI_REVISION)
 WIN32_LIBFFI_CFLAGS := -I$(WIN32_LIBFFI_PREFIX)/include
 WIN32_LIBFFI_LIBS := $(WIN32_LIBFFI_PREFIX)/lib/libffi.a
 TEST_BIN := $(BUILD_DIR)/tra_ffic_test
@@ -80,8 +80,8 @@ $(TEST_WIN32_BIN): tests/tra_ffic_test.c include/tra_ffic.h $(WIN32_LIBFFI_STAMP
 	$(WIN32_CC) $(WIN32_CFLAGS) $(WIN32_LIBFFI_CFLAGS) -Iinclude $< -o $@ $(WIN32_LIBFFI_LIBS) $(WIN32_LDFLAGS) -lm
 
 $(WIN32_LIBFFI_STAMP):
-	test -f "$(WIN32_LIBFFI_SOURCE_DIR)/configure.ac" || { \
-		echo "libffi submodule is not initialized; run: git submodule update --init deps/libffi-win32" >&2; \
+	test -f "$(LIBFFI_SOURCE_DIR)/configure.ac" || { \
+		echo "libffi submodule is not initialized; run: git submodule update --init deps/libffi" >&2; \
 		exit 1; \
 	}
 	command -v $(WIN32_CC) >/dev/null
@@ -89,7 +89,7 @@ $(WIN32_LIBFFI_STAMP):
 	command -v make >/dev/null
 	rm -rf "$(WIN32_LIBFFI_BUILD_DIR)" "$(WIN32_LIBFFI_PREFIX)"
 	mkdir -p "$(WIN32_LIBFFI_BUILD_DIR)"
-	cp -R "$(WIN32_LIBFFI_SOURCE_DIR)/." "$(WIN32_LIBFFI_BUILD_DIR)"
+	cp -R "$(LIBFFI_SOURCE_DIR)/." "$(WIN32_LIBFFI_BUILD_DIR)"
 	rm -f "$(WIN32_LIBFFI_BUILD_DIR)/.git"
 	cd "$(WIN32_LIBFFI_BUILD_DIR)" && ./autogen.sh
 	cd "$(WIN32_LIBFFI_BUILD_DIR)" && ./configure --host="$(WIN32_HOST)" --prefix="$(WIN32_LIBFFI_PREFIX_ABS)" --disable-shared --enable-static --disable-docs

@@ -129,7 +129,7 @@ On Win32 environments, you need to build libffi from the source included in this
 Clone this repository with `--recurse-submodules`, or initialize it in an existing checkout:
 
 ```sh
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 ```
 
 The [Makefile](./Makefile) may be useful as a reference for the build process.
@@ -726,7 +726,7 @@ Run the POSIX and Win32 tests together:
 ```bash
 sudo apt update
 sudo apt install -y autoconf automake libffi-dev libltdl-dev libtool pkg-config
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 make test-all
 ```
 
@@ -737,7 +737,7 @@ make test
 ```
 
 The development tests build 64-bit Windows binaries under the Win32 target name and run them with Wine.
-libffi for the Win32 build is built locally for mingw-w64 from `deps/libffi-win32`:
+libffi for the Win32 build is built locally for mingw-w64 from `deps/libffi`:
 
 ```sh
 make test-win32

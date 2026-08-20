@@ -127,7 +127,7 @@ Win32環境では、このリポジトリにgit submoduleとして含まれるli
 このリポジトリを `--recurse-submodules` 付きでcloneするか、既存のcheckoutでsubmoduleを初期化して下さい:
 
 ```sh
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 ```
 
 ビルド方法については [Makefile](./Makefile) を参考にすると良いでしょう。
@@ -726,7 +726,7 @@ POSIX向けテストとWin32向けテストをまとめて実行します:
 ```bash
 sudo apt update
 sudo apt install -y autoconf automake libffi-dev libltdl-dev libtool pkg-config
-git submodule update --init deps/libffi-win32
+git submodule update --init deps/libffi
 make test-all
 ```
 
@@ -737,7 +737,7 @@ make test
 ```
 
 開発用のテストでは、Win32ターゲット名で64ビットWindowsバイナリをビルドし、Wineで実行します。
-Win32ビルド用のlibffiは `deps/libffi-win32` からmingw-w64向けに自前ビルドされます:
+Win32ビルド用のlibffiは `deps/libffi` からmingw-w64向けに自前ビルドされます:
 
 ```sh
 make test-win32
