@@ -45,7 +45,7 @@ test: test-plain
 
 test-all:
 	$(MAKE) test
-	$(MAKE) test-win32
+	$(MAKE) CURL=false TAR=false test-win32
 
 test-plain: $(TEST_BIN)
 	$(TEST_BIN)
