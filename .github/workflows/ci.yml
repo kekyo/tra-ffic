@@ -9,12 +9,14 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
     env:
       ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/29.0.14206865
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -46,8 +48,23 @@ jobs:
             wine \
             zip
 
+      - name: Build libffi for Windows and Android
+        run: make libffi-win32 libffi-android
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: ./.github/codeql/tra-ffic.qls
+
       - name: Build and test
         run: ./build.sh
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          category: /language:c-cpp
 
   android-runtime:
     name: Android runtime (${{ matrix.name }})
@@ -163,28 +180,3 @@ jobs:
 
       - name: Run Android tests
         run: tests/android/run_emulator_tests.sh 35 google_apis 4096
-
-  codeql:
-    name: CodeQL (C/C++)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        with:
-          languages: c-cpp
-          build-mode: none
-
-      - name: Analyze with CodeQL
-        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        with:
-          category: /language:c-cpp
