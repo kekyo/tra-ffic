@@ -12,8 +12,8 @@ BASE_CFLAGS ?= -O3 -g -std=c99 -Wall -Wextra -Werror -pedantic -DTRA_FFIC_TRACK_
 CFLAGS ?= $(BASE_CFLAGS)
 ASAN_CFLAGS ?= -O1 -g -std=c99 -Wall -Wextra -Werror -pedantic -DTRA_FFIC_TRACK_CLOSURES -fsanitize=address -fno-omit-frame-pointer
 ASAN_OPTIONS ?= detect_leaks=1:halt_on_error=1
-LIBFFI_CFLAGS := $(shell $(PKG_CONFIG) --cflags libffi)
-LIBFFI_LIBS := $(shell $(PKG_CONFIG) --libs libffi)
+LIBFFI_CFLAGS = $(shell $(PKG_CONFIG) --cflags libffi)
+LIBFFI_LIBS = $(shell $(PKG_CONFIG) --libs libffi)
 WIN32_CFLAGS ?= -O3 -g -std=c99 -Wall -Wextra -Werror -DTRA_FFIC_TRACK_CLOSURES -DTRA_FFIC_IN_WIN32=1 -DTRA_FFIC_IN_POSIX=0 -D_WIN32_WINNT=0x0600
 WIN32_LDFLAGS ?= -static-libgcc
 ANDROID_NDK_ROOT ?=
@@ -339,3 +339,5 @@ $(ANDROID_ARM64_BUILD_DIR):
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+include tests/apple/Makefile
