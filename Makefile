@@ -114,7 +114,7 @@ else
 $(error Unsupported ANDROID_RUNTIME_ABI: $(ANDROID_RUNTIME_ABI))
 endif
 
-.PHONY: test test-all test-plain test-valgrind test-asan test-win32 libffi-win32 test-android test-android-artifacts test-android-runtime clean
+.PHONY: test test-all test-plain test-valgrind test-asan test-win32 libffi-win32 libffi-android test-android test-android-artifacts test-android-runtime clean
 
 test: test-plain
 	$(MAKE) test-valgrind
@@ -123,6 +123,7 @@ test: test-plain
 test-all:
 	$(MAKE) test
 	$(MAKE) CURL=false TAR=false test-win32
+	sh tests/android/emulator_cleanup_test.sh
 
 test-plain: $(TEST_BIN)
 	$(TEST_BIN)
@@ -137,6 +138,12 @@ test-win32: $(TEST_WIN32_BIN) $(WINE_PREFIX_STAMP)
 	DISPLAY= WINEARCH="$(WINE_ARCH)" WINEDEBUG="$(WINE_DEBUG)" WINEPREFIX="$(WINE_PREFIX)" $(WINE) $(TEST_WIN32_BIN)
 
 libffi-win32: $(WIN32_LIBFFI_STAMP)
+
+libffi-android: $(ANDROID_X86_64_LIBFFI_STAMP) $(ANDROID_ARM64_LIBFFI_STAMP)
+
+.PHONY: build-native-tests
+build-native-tests: $(TEST_BIN) $(TEST_ASAN_BIN) $(TEST_WIN32_BIN) \
+                    $(ANDROID_X86_64_TEST_LIB) $(ANDROID_ARM64_TEST_LIB)
 
 test-android: test-android-artifacts
 
