@@ -109,9 +109,13 @@ int main(void) {
 ### 環境
 
 - POSIX
-- Win32
 - Android 7.0（API 24）以降（`x86_64`、`arm64-v8a`、4 KiB／16 KiBページサイズ）
+- macOS（experimental, 最低ターゲットは Intel x86_64 が 10.13、Apple Silicon arm64 が 11.0）
+- iOS（experimental, arm64、最低ターゲット 15.0）
+- Win32
 - libffi 3.8.0
+
+Xcode 16.4 でビルドした回帰テストを Intel Mac の macOS 15.7.9 と Apple Silicon Mac の macOS 15.8.2 で実行しました。iOS は実機用 SDK 18.5 でのリンクまで確認し、iOS 18.5 の iPhone 16 Simulator で回帰テストを実行しました。[Apple 向けの検証結果](https://github.com/kekyo/tra-ffic/actions/runs/45811475397)
 
 ---
 
@@ -124,7 +128,7 @@ sudo apt update
 sudo apt install -y libffi-dev
 ```
 
-Win32環境とAndroid環境では、このリポジトリにgit submoduleとして含まれるlibffiのソースをビルドする必要があります。
+Win32、Android、macOS、iOS 向けには、このリポジトリの git submodule に含まれる libffi をビルドします。
 このリポジトリを `--recurse-submodules` 付きでcloneするか、既存のcheckoutでsubmoduleを初期化して下さい:
 
 ```sh
@@ -134,6 +138,8 @@ git submodule update --init deps/libffi
 ビルド方法については [Makefile](./Makefile) を参考にすると良いでしょう。
 Androidでは、tra-fficとlibffiをターゲットABIごとのC99位置独立コードとしてビルドし、libffiをネイティブライブラリへ静的リンクして下さい。
 ネイティブライブラリとAPK内のエントリは16 KiBページサイズ端末向けのアラインメントが必要です。このため、付属MakefileではELFの最大ページサイズとZIPアラインメントを16 KiBに設定しています。
+
+macOS・iOS 向けの成果物は `.build/apple/<libffi のリビジョン>/<SDK>-<SDK バージョン>/<CPU>-<最低 OS>/` にあります。アプリのヘッダー検索パスにこの中の `libffi/include` を加え、同じビルドの `libffi/.libs/libffi.a` を静的リンクしてください。iPhone 実機用には `iphoneos`、Simulator 用には `iphonesimulator` の成果物を使います。
 
 libffiが準備できれば、あとはあなたのプロジェクトに [`include/tra_ffic.h`](./include/tra_ffic.h) をコピーしてインクルードして下さい:
 
@@ -749,6 +755,16 @@ make test-win32
 `x86_64-w64-mingw32-gcc` でWin32テストバイナリをビルドし、`wine` で実行します。
 Win32テストではvalgrindとASANは使用しません。
 
+Mac では Xcode を選択してから次のコマンドを実行します。`gmake test-macos` は現在の Mac で回帰テストを実行します。`gmake test-ios` は実機用と Simulator 用のアプリをビルドし、iPhone 16 Simulator で同じテストを実行します。iOS のテストには iOS 18.5 Simulator ランタイムが必要です。
+
+```sh
+brew install autoconf automake libtool make
+gmake test-macos
+gmake test-ios
+```
+
+Linux x86_64 では `make macos-cross` で Intel と Apple Silicon 向けの実行ファイルを生成し、CPU と最低 OS を検査できます。初回は Zig 0.15.2 を取得します。Ubuntu では上記のビルドツールに加えて `curl file llvm lld xz-utils` をインストールしてください。`./build.sh` は Linux x86_64 でこのクロスビルドを行い、Mac では `gmake test-macos` を実行します。
+
 Androidビルドには、JDK、Android NDK 29.0.14206865、SDK Platform 37.0、Build Tools 36.0.0が必要です。
 対応する両ABIのAPKをビルドし、16 KiBのELF／ZIPアラインメントを含めて検証します:
 
@@ -769,6 +785,8 @@ make -j test-android-runtime \
   ANDROID_EXPECTED_PAGE_SIZE=16384 \
   ADB_SERIAL=device-serial
 ```
+
+---
 
 ## 備考
 
