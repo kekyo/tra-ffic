@@ -59,12 +59,29 @@ jobs:
           queries: ./.github/codeql/tra-ffic.qls
 
       - name: Build native test binaries
+        env:
+          # Make CodeQL use each compiler's include paths without falling back to /usr/include.
+          USR_INCLUDE: ""
         run: make -j2 build-native-tests
 
       - name: Analyze with CodeQL
+        id: analyze
         uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: /language:c-cpp
+
+      - name: Verify CodeQL extracted the library and native tests
+        env:
+          SARIF_DIR: ${{ steps.analyze.outputs.sarif-output }}
+        run: |
+          jq -e '
+            [.runs[].invocations[].toolExecutionNotifications[]
+              | select(.descriptor.id == "cpp/diagnostics/successfully-extracted-files")
+              | .locations[].physicalLocation.artifactLocation.uri] as $extracted
+            | ["include/tra_ffic.h", "tests/tra_ffic_test.c", "tests/android/tra_ffic_android_test.c"]
+              - $extracted
+            | if length == 0 then true else error("Missing from CodeQL: \(join(", "))") end
+          ' "$SARIF_DIR/cpp.sarif"
 
       - name: Run tests
         env:
