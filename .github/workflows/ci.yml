@@ -21,12 +21,17 @@ jobs:
         include:
           - name: macOS Intel
             runner: macos-15-intel
+            platform: macos
             arch: x86_64
             minimum: "10.13"
           - name: macOS Apple Silicon
             runner: macos-15
+            platform: macos
             arch: arm64
             minimum: "11.0"
+          - name: iOS SDKs and Simulator
+            runner: macos-15
+            platform: ios
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
@@ -41,12 +46,16 @@ jobs:
             brew list --versions "$formula" >/dev/null || brew install "$formula"
           done
       - name: Build and run the native regression tests
+        if: matrix.platform == 'macos'
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.minimum }}
         run: |
           test "$(uname -m)" = "$EXPECTED_ARCH"
           ./build.sh
+      - name: Build for iPhone and run the regression tests in Simulator
+        if: matrix.platform == 'ios'
+        run: gmake test-ios
 
   build-and-test:
     runs-on: ubuntu-24.04

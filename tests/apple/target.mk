@@ -24,9 +24,17 @@ APPLE_DSYMUTIL := $(LLVM_PREFIX)dsymutil
 else
 XCRUN := xcrun --sdk $(PLATFORM)
 SDK_VERSION := $(shell $(XCRUN) --show-sdk-version)
+ifeq ($(PLATFORM),macosx)
 MINIMUM := $(or $(MACOSX_DEPLOYMENT_TARGET),$(MINIMUM))
 TARGET := $(ARCH)-apple-macos$(MINIMUM)
 FFI_HOST := $(shell "$(FFI_SOURCE)/config.guess")
+else
+MINIMUM := 15.0
+SIMULATOR_SUFFIX := $(if $(filter iphonesimulator,$(PLATFORM)),-simulator)
+TARGET := $(ARCH)-apple-ios$(MINIMUM)$(SIMULATOR_SUFFIX)
+FFI_HOST := $(CPU)-apple-ios$(SIMULATOR_SUFFIX)
+MACHO_PLATFORM := $(if $(SIMULATOR_SUFFIX),iossimulator,ios)
+endif
 APPLE_CC := $(XCRUN) clang -target $(TARGET)
 APPLE_CXX := $(XCRUN) clang++ -target $(TARGET)
 APPLE_AR := $(shell $(XCRUN) --find ar)
@@ -43,6 +51,18 @@ FFI_BUILD := $(OUT)/libffi
 ARCHIVE := $(FFI_BUILD)/.libs/libffi.a
 TEST := $(OUT)/tra_ffic_test
 TEST_FLAGS := -O3 -g -std=c99 -Wall -Wextra -Werror -pedantic -DTRA_FFIC_TRACK_CLOSURES
+ifneq ($(filter iphoneos iphonesimulator,$(PLATFORM)),)
+APP := $(OUT)/TraFficTest.app
+TEST := $(APP)/tra_ffic_test
+APP_INFO := $(APP)/Info.plist
+APP_SOURCE := tests/ios/tra_ffic_ios_test.m
+REGRESSION_FLAGS := -Dmain=tra_ffic_ios_regression_main
+
+$(APP_INFO): tests/ios/Info.plist
+	mkdir -p "$(@D)"
+	cp "$<" "$@"
+	plutil -insert MinimumOSVersion -string "$(MINIMUM)" "$@"
+endif
 
 $(FFI_BUILD)/.configured: $(FFI_SOURCE)/.prepared tests/apple/target.mk
 	rm -rf "$(FFI_BUILD)"
@@ -62,20 +82,27 @@ $(ARCHIVE): $(FFI_BUILD)/.configured
 	$(MAKE) -C "$(FFI_BUILD)" libffi.la
 
 $(OUT)/regression.o: tests/tra_ffic_test.c include/tra_ffic.h $(FFI_BUILD)/.configured
-	$(APPLE_CC) $(TEST_FLAGS) -isystem "$(FFI_BUILD)/include" -Iinclude -c "$<" -o "$@"
+	$(APPLE_CC) $(TEST_FLAGS) $(REGRESSION_FLAGS) -isystem "$(FFI_BUILD)/include" -Iinclude -c "$<" -o "$@"
 
-$(TEST): $(OUT)/regression.o $(ARCHIVE)
+$(TEST): $(OUT)/regression.o $(ARCHIVE) $(APP_SOURCE)
 ifeq ($(PLATFORM),macos-cross)
 	"$(APPLE_LD)" -fatal_warnings -arch "$(ARCH)" -platform_version macos $(MINIMUM) $(SDK_VERSION) \
 		-L"$(DARWIN_STUBS)" -o "$@" "$<" "$(ARCHIVE)" -lSystem
+else ifneq ($(APP),)
+	mkdir -p "$(@D)"
+	$(APPLE_CC) $(TEST_FLAGS) -fobjc-arc -Wl,-fatal_warnings "$<" "$(APP_SOURCE)" "$(ARCHIVE)" \
+		-framework UIKit -framework Foundation -o "$@"
 else
 	$(APPLE_CC) -Wl,-fatal_warnings -o "$@" "$<" "$(ARCHIVE)"
 endif
 
-.PHONY: verify run-macos
-verify: $(TEST)
+.PHONY: verify run-macos run-ios
+verify: $(TEST) $(APP_INFO)
 	sh tests/apple/check-macho.sh "$(APPLE_OBJDUMP)" "$(TEST)" "$(ARCH)" "$(MACHO_PLATFORM)" "$(MINIMUM)"
 
 run-macos: verify
 	"$(TEST)"
 	@echo "tra_ffic_macos_test: PASS ($(ARCH), deployment $(MINIMUM), macOS $$(sw_vers -productVersion))"
+
+run-ios: verify
+	sh tests/ios/run-simulator.sh "$(APP)" "$(OUT)/launch.log"

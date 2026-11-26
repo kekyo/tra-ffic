@@ -20,3 +20,8 @@ macos-cross-x86_64 macos-cross-arm64: $(APPLE_FFI_SOURCE)/.prepared | $(APPLE_ZI
 .PHONY: test-macos
 test-macos: $(APPLE_FFI_SOURCE)/.prepared
 	+$(APPLE_MAKE) PLATFORM=macosx ARCH="$(shell uname -m)" run-macos
+
+.PHONY: test-ios
+test-ios: $(APPLE_FFI_SOURCE)/.prepared
+	+$(APPLE_MAKE) PLATFORM=iphoneos ARCH=arm64 verify
+	+$(APPLE_MAKE) PLATFORM=iphonesimulator ARCH="$(shell uname -m)" run-ios
