@@ -16,3 +16,7 @@ macos-cross: macos-cross-x86_64 macos-cross-arm64
 macos-cross-x86_64 macos-cross-arm64: $(APPLE_FFI_SOURCE)/.prepared | $(APPLE_ZIG_DIR)/zig
 	+$(APPLE_MAKE) PLATFORM=macos-cross ARCH=$(@:macos-cross-%=%) \
 		ZIG_DIR="$(APPLE_ZIG_DIR)" verify
+
+.PHONY: test-macos
+test-macos: $(APPLE_FFI_SOURCE)/.prepared
+	+$(APPLE_MAKE) PLATFORM=macosx ARCH="$(shell uname -m)" run-macos

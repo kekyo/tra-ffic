@@ -2,6 +2,10 @@
 
 set -eu
 
+if [ "$(uname -s)" = Darwin ]; then
+    exec gmake test-macos
+fi
+
 android_ndk_path=${ANDROID_NDK_ROOT:-}
 android_sdk_path=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 

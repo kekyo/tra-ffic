@@ -11,6 +11,43 @@ permissions:
   contents: read
 
 jobs:
+  apple:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Intel
+            runner: macos-15-intel
+            arch: x86_64
+            minimum: "10.13"
+          - name: macOS Apple Silicon
+            runner: macos-15
+            arch: arm64
+            minimum: "11.0"
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          submodules: true
+      - name: Prepare Apple build tools
+        run: |
+          xcodebuild -version
+          for formula in autoconf automake libtool make; do
+            brew list --versions "$formula" >/dev/null || brew install "$formula"
+          done
+      - name: Build and run the native regression tests
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.minimum }}
+        run: |
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          ./build.sh
+
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
