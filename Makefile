@@ -140,6 +140,10 @@ libffi-win32: $(WIN32_LIBFFI_STAMP)
 
 libffi-android: $(ANDROID_X86_64_LIBFFI_STAMP) $(ANDROID_ARM64_LIBFFI_STAMP)
 
+.PHONY: build-native-tests
+build-native-tests: $(TEST_BIN) $(TEST_ASAN_BIN) $(TEST_WIN32_BIN) \
+                    $(ANDROID_X86_64_TEST_LIB) $(ANDROID_ARM64_TEST_LIB)
+
 test-android: test-android-artifacts
 
 test-android-artifacts: $(ANDROID_X86_64_TEST_APK) $(ANDROID_ARM64_TEST_APK)

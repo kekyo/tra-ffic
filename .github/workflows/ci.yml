@@ -58,13 +58,19 @@ jobs:
           build-mode: manual
           queries: ./.github/codeql/tra-ffic.qls
 
-      - name: Build and test
-        run: ./build.sh
+      - name: Build native test binaries
+        run: make -j2 build-native-tests
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: /language:c-cpp
+
+      - name: Run tests
+        env:
+          # Keep CodeQL's preloaded tracer out of Valgrind and AddressSanitizer.
+          LD_PRELOAD: ""
+        run: ./build.sh
 
   android-runtime:
     name: Android runtime (${{ matrix.name }})
