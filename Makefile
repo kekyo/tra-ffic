@@ -123,6 +123,7 @@ test: test-plain
 test-all:
 	$(MAKE) test
 	$(MAKE) CURL=false TAR=false test-win32
+	sh tests/android/emulator_cleanup_test.sh
 
 test-plain: $(TEST_BIN)
 	$(TEST_BIN)
