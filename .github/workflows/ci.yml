@@ -38,6 +38,8 @@ jobs:
             autoconf \
             automake \
             ca-certificates \
+            curl \
+            file \
             gcc-mingw-w64-x86-64 \
             libffi-dev \
             libltdl-dev \
@@ -46,6 +48,7 @@ jobs:
             unzip \
             valgrind \
             wine \
+            xz-utils \
             zip
 
       - name: Build libffi for Windows and Android
