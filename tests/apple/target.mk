@@ -24,6 +24,9 @@ APPLE_DSYMUTIL := $(LLVM_PREFIX)dsymutil
 else
 XCRUN := xcrun --sdk $(PLATFORM)
 SDK_VERSION := $(shell $(XCRUN) --show-sdk-version)
+ifeq ($(strip $(SDK_VERSION)),)
+$(error Could not find the $(PLATFORM) SDK in the selected Xcode installation)
+endif
 ifeq ($(PLATFORM),macosx)
 MINIMUM := $(or $(MACOSX_DEPLOYMENT_TARGET),$(MINIMUM))
 TARGET := $(ARCH)-apple-macos$(MINIMUM)
@@ -67,19 +70,19 @@ endif
 $(FFI_BUILD)/.configured: $(FFI_SOURCE)/.prepared tests/apple/target.mk
 	rm -rf "$(FFI_BUILD)"
 	mkdir -p "$(FFI_BUILD)"
-	# tra-ffic uses the C closure API. Omit libffi's deprecated Java raw interface.
 	cd "$(FFI_BUILD)" && CC='$(APPLE_CC)' CXX='$(APPLE_CXX)' \
 		AR="$(APPLE_AR)" RANLIB="$(APPLE_RANLIB)" NM="$(APPLE_NM)" STRIP="$(APPLE_STRIP)" \
 		LD="$(APPLE_LD)" OBJDUMP="$(APPLE_OBJDUMP)" DSYMUTIL="$(APPLE_DSYMUTIL)" \
 		FILECMD=file MANIFEST_TOOL=: READELF=: \
-		CPPFLAGS=-DNO_JAVA_RAW_API CFLAGS=-O2 \
+		CFLAGS=-O2 \
 		"$(FFI_SOURCE)/configure" --build="$$("$(FFI_SOURCE)/config.guess")" \
 		--host="$(FFI_HOST)" --disable-shared --enable-static --disable-docs \
 		> configure-output.log 2>&1 || { cat "$(FFI_BUILD)/configure-output.log" >&2; exit 1; }
 	touch "$@"
 
 $(ARCHIVE): $(FFI_BUILD)/.configured
-	$(MAKE) -C "$(FFI_BUILD)" libffi.la
+	# Keep libffi's exported Java compatibility functions, which call one another.
+	$(MAKE) -C "$(FFI_BUILD)" --eval='src/java_raw_api.lo: private CFLAGS += -Wno-deprecated-declarations' libffi.la
 
 $(OUT)/regression.o: tests/tra_ffic_test.c include/tra_ffic.h $(FFI_BUILD)/.configured
 	$(APPLE_CC) $(TEST_FLAGS) $(REGRESSION_FLAGS) -isystem "$(FFI_BUILD)/include" -Iinclude -c "$<" -o "$@"
