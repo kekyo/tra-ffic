@@ -1,0 +1,7 @@
+- description: Additional buffer and pointer bounds checks for tra-ffic
+- queries: .
+  from: codeql/cpp-queries
+- include:
+    id:
+      - cpp/overflow-buffer
+      - cpp/invalid-pointer-deref

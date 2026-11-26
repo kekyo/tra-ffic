@@ -65,10 +65,11 @@ cleanup_android_test() {
     trap - EXIT INT TERM
 
     if [ -n "$android_test_pid" ]; then
-        "$android_test_adb" -s "$android_test_serial" emu kill >/dev/null 2>&1 || true
-        if kill -0 "$android_test_pid" >/dev/null 2>&1; then
-            kill "$android_test_pid" >/dev/null 2>&1 || true
-        fi
+        timeout -k 5s 10s "$android_test_adb" -s "$android_test_serial" emu kill \
+            >/dev/null 2>&1 || true
+        # QEMU can ignore SIGTERM after acknowledging shutdown. This temporary
+        # AVD has no snapshots to save.
+        kill -KILL "$android_test_pid" 2>/dev/null || true
         wait "$android_test_pid" >/dev/null 2>&1 || true
     fi
 
@@ -83,8 +84,8 @@ cleanup_android_test() {
 }
 trap cleanup_android_test EXIT INT TERM
 
-export ANDROID_USER_HOME=$android_test_root/user
-export ANDROID_AVD_HOME=$android_test_root/avd
+export ANDROID_USER_HOME="$android_test_root/user"
+export ANDROID_AVD_HOME="$android_test_root/avd"
 mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
 
 printf 'no\n' | "$android_test_avd_manager" create avd \

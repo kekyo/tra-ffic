@@ -9,12 +9,60 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
+  apple:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Intel
+            runner: macos-15-intel
+            platform: macos
+            arch: x86_64
+            minimum: "10.13"
+          - name: macOS Apple Silicon
+            runner: macos-15
+            platform: macos
+            arch: arm64
+            minimum: "11.0"
+          - name: iOS SDKs and Simulator
+            runner: macos-15
+            platform: ios
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          submodules: true
+      - name: Prepare Apple build tools
+        run: |
+          xcodebuild -version
+          for formula in autoconf automake libtool make; do
+            brew list --versions "$formula" >/dev/null || brew install "$formula"
+          done
+      - name: Build and run the native regression tests
+        if: matrix.platform == 'macos'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.minimum }}
+        run: |
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          ./build.sh
+      - name: Build for iPhone and run the regression tests in Simulator
+        if: matrix.platform == 'ios'
+        run: gmake test-ios
+
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
     env:
       ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/29.0.14206865
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -36,6 +84,8 @@ jobs:
             autoconf \
             automake \
             ca-certificates \
+            curl \
+            file \
             gcc-mingw-w64-x86-64 \
             libffi-dev \
             libltdl-dev \
@@ -44,9 +94,48 @@ jobs:
             unzip \
             valgrind \
             wine \
+            xz-utils \
             zip
 
-      - name: Build and test
+      - name: Build libffi for Windows and Android
+        run: make libffi-win32 libffi-android
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: ./.github/codeql/tra-ffic.qls
+
+      - name: Build native test binaries
+        env:
+          # Make CodeQL use each compiler's include paths without falling back to /usr/include.
+          USR_INCLUDE: ""
+        run: make -j2 build-native-tests
+
+      - name: Analyze with CodeQL
+        id: analyze
+        uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          category: /language:c-cpp
+
+      - name: Verify CodeQL extracted the library and native tests
+        env:
+          SARIF_DIR: ${{ steps.analyze.outputs.sarif-output }}
+        run: |
+          jq -e '
+            [.runs[].invocations[].toolExecutionNotifications[]
+              | select(.descriptor.id == "cpp/diagnostics/successfully-extracted-files")
+              | .locations[].physicalLocation.artifactLocation.uri] as $extracted
+            | ["include/tra_ffic.h", "tests/tra_ffic_test.c", "tests/android/tra_ffic_android_test.c"]
+              - $extracted
+            | if length == 0 then true else error("Missing from CodeQL: \(join(", "))") end
+          ' "$SARIF_DIR/cpp.sarif"
+
+      - name: Run tests
+        env:
+          # Keep CodeQL's preloaded tracer out of Valgrind and AddressSanitizer.
+          LD_PRELOAD: ""
         run: ./build.sh
 
   android-runtime:
@@ -163,28 +252,3 @@ jobs:
 
       - name: Run Android tests
         run: tests/android/run_emulator_tests.sh 35 google_apis 4096
-
-  codeql:
-    name: CodeQL (C/C++)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        with:
-          languages: c-cpp
-          build-mode: none
-
-      - name: Analyze with CodeQL
-        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        with:
-          category: /language:c-cpp

@@ -111,9 +111,13 @@ For example, if it is used as a cross-call infrastructure in mechanically genera
 ### Environment
 
 - POSIX
-- Win32
 - Android 7.0 (API 24) or later (`x86_64` and `arm64-v8a`, 4 KiB and 16 KiB page sizes)
+- macOS (experimental, deployment target 10.13 for Intel x86_64 and 11.0 for Apple Silicon arm64)
+- iOS (experimental, arm64, deployment target 15.0)
+- Win32
 - libffi 3.8.0
+
+The regression suite built with Xcode 16.4 ran on an Intel Mac with macOS 15.7.9 and an Apple Silicon Mac with macOS 15.8.2. The iOS app linked against the iOS 18.5 device SDK. The suite ran on an iPhone 16 Simulator with iOS 18.5. [Apple test results](https://github.com/kekyo/tra-ffic/actions/runs/45811475397)
 
 ---
 
@@ -126,7 +130,7 @@ sudo apt update
 sudo apt install -y libffi-dev
 ```
 
-On Win32 and Android environments, you need to build libffi from the source included in this repository as a git submodule.
+For Win32, Android, macOS, and iOS, build libffi from the git submodule in this repository.
 Clone this repository with `--recurse-submodules`, or initialize it in an existing checkout:
 
 ```sh
@@ -136,6 +140,8 @@ git submodule update --init deps/libffi
 The [Makefile](./Makefile) may be useful as a reference for the build process.
 For Android, build tra-ffic and libffi as C99 position-independent code for each target ABI, and link libffi statically into the native library.
 Native libraries and their APK entries must be aligned for 16 KiB page-size devices; the provided Makefile uses a 16 KiB maximum ELF page size and ZIP alignment for this purpose.
+
+Apple build products are under `.build/apple/<libffi revision>/<SDK>-<SDK version>/<CPU>-<deployment target>/`. Add its `libffi/include` directory to your app's header search path and link the static archive `libffi/.libs/libffi.a` from the same build. Use the `iphoneos` build for an iPhone and the `iphonesimulator` build for Simulator.
 
 Once libffi is ready, copy [`include/tra_ffic.h`](./include/tra_ffic.h) into your project and include it:
 
@@ -749,6 +755,16 @@ make test-win32
 `x86_64-w64-mingw32-gcc` builds the Win32 test binaries, and `wine` runs them.
 The Win32 tests do not use Valgrind or ASAN.
 
+On a Mac, select Xcode and run the commands below. `gmake test-macos` runs the regression suite on the host Mac. `gmake test-ios` builds the device and Simulator apps, then runs the same suite on an iPhone 16 Simulator. The iOS test requires the iOS 18.5 Simulator runtime.
+
+```sh
+brew install autoconf automake libtool make
+gmake test-macos
+gmake test-ios
+```
+
+On x86_64 Linux, `make macos-cross` builds executables for Intel and Apple Silicon and checks their CPU and minimum OS. The first build downloads Zig 0.15.2. On Ubuntu, install `curl file llvm lld xz-utils` in addition to the build tools above. `./build.sh` includes this cross-build on x86_64 Linux and runs `gmake test-macos` on a Mac.
+
 The Android build requires JDK, Android NDK 29.0.14206865, SDK Platform 37.0, and Build Tools 36.0.0.
 Build and validate APKs for both supported ABIs, including 16 KiB ELF and ZIP alignment:
 
@@ -770,6 +786,8 @@ make -j test-android-runtime \
   ADB_SERIAL=device-serial
 ```
 
+---
+
 ## Notes
 
 This project began when I considered porting the core functionality of [DupeNukem](https://github.com/kekyo/DupeNukem/) to native code.
@@ -779,3 +797,26 @@ While working on a similar implementation in ["muon" project](https://github.com
 ## License
 
 Under MIT
+
+---
+
+## History
+
+- 1.1.0
+  - Added experimental support for macOS (Intel and Apple Silicon) and iOS (arm64). The regression suite runs on both Mac architectures and in the iOS Simulator.
+  - Extended CodeQL analysis to the native test builds for POSIX, Win32, and Android.
+- 1.0.0
+  - Added support for Android 7.0 (API 24) and later on `x86_64` and `arm64-v8a`, with 4 KiB and 16 KiB page sizes.
+  - Pinned libffi 3.8.0 as a Git submodule for Win32 and Android builds.
+  - Added automated regression testing and CodeQL analysis in GitHub Actions.
+- 0.5.0
+  - Fixed a race that could free a registered function while tra-ffic was creating an adapter for it.
+- 0.4.0
+  - Added `tra_ffic_type_struct()` for passing and returning C structs by value, including nested structs and fields that hold function pointers.
+- 0.3.0
+  - Added `tra_ffic_signature_pointer_list()` for passing arguments as an array of pointers to their values.
+  - Added automatic conversion between pointer-list and stack signatures for registered function pointers.
+- 0.2.0
+  - Added `TRA_FFIC_SIGNATURE_ABI_RETVAL` for synchronous C functions that return a value directly. Functions that deliver results through a completion callback use `TRA_FFIC_SIGNATURE_ABI_COMPLETION`.
+- 0.1.0
+  - Released the header-only library for POSIX and Win32 with bidirectional asynchronous calls, completion callbacks, and managed closures.
