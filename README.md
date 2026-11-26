@@ -797,3 +797,26 @@ While working on a similar implementation in ["muon" project](https://github.com
 ## License
 
 Under MIT
+
+---
+
+## History
+
+- 1.1.0
+  - Added experimental support for macOS (Intel and Apple Silicon) and iOS (arm64). The regression suite runs on both Mac architectures and in the iOS Simulator.
+  - Extended CodeQL analysis to the native test builds for POSIX, Win32, and Android.
+- 1.0.0
+  - Added support for Android 7.0 (API 24) and later on `x86_64` and `arm64-v8a`, with 4 KiB and 16 KiB page sizes.
+  - Pinned libffi 3.8.0 as a Git submodule for Win32 and Android builds.
+  - Added automated regression testing and CodeQL analysis in GitHub Actions.
+- 0.5.0
+  - Fixed a race that could free a registered function while tra-ffic was creating an adapter for it.
+- 0.4.0
+  - Added `tra_ffic_type_struct()` for passing and returning C structs by value, including nested structs and fields that hold function pointers.
+- 0.3.0
+  - Added `tra_ffic_signature_pointer_list()` for passing arguments as an array of pointers to their values.
+  - Added automatic conversion between pointer-list and stack signatures for registered function pointers.
+- 0.2.0
+  - Added `TRA_FFIC_SIGNATURE_ABI_RETVAL` for synchronous C functions that return a value directly. Functions that deliver results through a completion callback use `TRA_FFIC_SIGNATURE_ABI_COMPLETION`.
+- 0.1.0
+  - Released the header-only library for POSIX and Win32 with bidirectional asynchronous calls, completion callbacks, and managed closures.
